@@ -1,0 +1,10 @@
+[project]
+name = "tarrain-reforger"
+version = "0.1.0"
+description = "ML assisted terrain generation for Terraria"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "lihzahrd>=3.1.0",
+    "numpy>=2.4.2",
+]
