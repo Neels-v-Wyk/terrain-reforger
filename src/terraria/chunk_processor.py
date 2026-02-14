@@ -14,7 +14,7 @@ from .converters import tile_to_data
 
 # Default chunk parameters
 DEFAULT_CHUNK_SIZE = 64
-DEFAULT_OVERLAP = 0
+DEFAULT_OVERLAP = 32
 
 
 def extract_chunk(
