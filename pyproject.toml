@@ -9,6 +9,7 @@ dependencies = [
     "matplotlib>=3.10.8",
     "numpy>=2.4.2",
     "rich>=14.1.0",
+    "terraschem @ git+https://github.com/Neels-v-Wyk/terraschem.git",
     "torch>=2.10.0",
     "typer>=0.16.1",
     "tqdm>=4.67.3",

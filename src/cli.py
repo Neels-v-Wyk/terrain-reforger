@@ -9,6 +9,7 @@ import typer
 from rich.console import Console
 
 from src.commands.analyze import main as analyze_main
+from src.commands.export import main as export_main
 from src.commands.infer import main as infer_main
 from src.commands.train import main as train_main
 from src.commands.worldgen import main as worldgen_main
@@ -97,6 +98,45 @@ def _run_infer(
     infer_main(argv)
 
 
+def _run_export(
+    model: str | None = typer.Argument(None, help="Checkpoint/model path"),
+    world: str | None = typer.Option(None, "--world", help="Path to .wld file"),
+    region: List[int] | None = typer.Option(None, "--region", help="Region as X0 Y0 X1 Y1 (overrides x/y/width/height)"),
+    x: int = typer.Option(1500, "--x", help="Starting X coordinate in world"),
+    y: int = typer.Option(500, "--y", help="Starting Y coordinate in world"),
+    width: int = typer.Option(64, "--width", help="Width of exported region (tiles)"),
+    height: int = typer.Option(64, "--height", help="Height of exported region (tiles)"),
+    output_dir: str = typer.Option("exports", "--output-dir", help="Output directory"),
+    name: str | None = typer.Option(None, "--name", help="Schematic name (shown in TEdit)"),
+    mode: str = typer.Option("compare", "--mode", help="Mode: compare (before/after), reconstruct (output only), generate"),
+    samples: int = typer.Option(1, "--samples", help="Number of regions to export"),
+    seed: int | None = typer.Option(None, "--seed", help="Random seed for generation"),
+) -> None:
+    """Export inference results as TEdit schematics."""
+    argv: List[str] = []
+    if model:
+        argv.append(model)
+    if world:
+        argv.extend(["--world", world])
+    if region and len(region) == 4:
+        argv.extend(["--region", str(region[0]), str(region[1]), str(region[2]), str(region[3])])
+    argv.extend(["--x", str(x)])
+    argv.extend(["--y", str(y)])
+    argv.extend(["--width", str(width)])
+    argv.extend(["--height", str(height)])
+    argv.extend(["--output-dir", output_dir])
+    if name:
+        argv.extend(["--name", name])
+    argv.extend(["--mode", mode])
+    argv.extend(["--samples", str(samples)])
+    if seed is not None:
+        argv.extend(["--seed", str(seed)])
+
+    exit_code = export_main(argv)
+    if exit_code != 0:
+        raise typer.Exit(code=exit_code)
+
+
 def _run_analyze(
     source_dir: str = typer.Option("worldgen", "--source-dir", help="Directory containing .wld files"),
     output: str = typer.Option("src/terraria/natural_ids.py", "--output", help="Output module path"),
@@ -164,6 +204,33 @@ def model_infer_command(
 ) -> None:
     """Run model inference and reconstruction comparison."""
     _run_infer(model, world, region, chunk_size, samples)
+
+
+@model_app.command("export")
+def model_export_command(
+    model: str | None = typer.Argument(None, help="Checkpoint/model path"),
+    world: str | None = typer.Option(None, "--world", help="Path to .wld file"),
+    region: List[int] | None = typer.Option(None, "--region", help="Region as X0 Y0 X1 Y1 (overrides x/y/width/height)"),
+    x: int = typer.Option(1500, "--x", help="Starting X coordinate in world"),
+    y: int = typer.Option(500, "--y", help="Starting Y coordinate in world"),
+    width: int = typer.Option(64, "--width", help="Width of exported region (tiles)"),
+    height: int = typer.Option(64, "--height", help="Height of exported region (tiles)"),
+    output_dir: str = typer.Option("exports", "--output-dir", help="Output directory"),
+    name: str | None = typer.Option(None, "--name", help="Schematic name (shown in TEdit)"),
+    mode: str = typer.Option("compare", "--mode", help="Mode: compare (before/after), reconstruct (output only), generate"),
+    samples: int = typer.Option(1, "--samples", help="Number of regions to export"),
+    seed: int | None = typer.Option(None, "--seed", help="Random seed for generation"),
+) -> None:
+    """Export inference results as TEdit schematics (.TEditSch).
+    
+    The default 'compare' mode exports both the original chunk (before VAE) and 
+    the reconstructed chunk (after VAE) so you can compare quality in TEdit.
+    
+    Examples:
+        terrain model export --width 100 --height 50
+        terrain model export --x 2000 --y 300 --width 64 --height 64 --samples 3
+    """
+    _run_export(model, world, region, x, y, width, height, output_dir, name, mode, samples, seed)
 
 
 app.add_typer(data_app, name="data")
