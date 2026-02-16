@@ -1,3 +1,3 @@
-"""Terrain Reforger - Terraria ML Toolkit"""
+"""Terrain Reforger"""
 
 __version__ = '0.1.0'

@@ -6,7 +6,7 @@ and preferring diverse, interesting chunks for training.
 """
 
 import numpy as np
-from typing import List, Tuple, Optional, Callable
+from typing import List, Tuple, Optional, Callable, Union
 from collections import Counter
 from dataclasses import dataclass
 import torch
@@ -94,10 +94,10 @@ def analyze_chunk(chunk_tensor: torch.Tensor) -> ChunkStats:
     block_entropy = calculate_entropy(block_types[block_active > 0.5]) if unique_blocks > 1 else 0.0
     wall_entropy = calculate_entropy(wall_types[wall_types > 0]) if unique_walls > 1 else 0.0
     
-    has_liquid = np.any(liquid_amount > 0)
-    has_wiring = np.any(wiring > 0.5)
+    has_liquid = bool(np.any(liquid_amount > 0))
+    has_wiring = bool(np.any(wiring > 0.5))
     
-    block_coverage = np.mean(block_active > 0.5)
+    block_coverage = float(np.mean(block_active > 0.5))
     
     # Calculate diversity score (0-1, higher = more interesting)
     # Factors:
@@ -195,10 +195,16 @@ class DiversitySampler:
         if self.adaptive and len(self.diversity_scores) > 100:
             # If we're rejecting too much, lower the threshold
             current_rejection_rate = 1 - (self.total_accepted / self.total_seen)
+            
             if current_rejection_rate > self.max_rejection_rate:
                 # Lower threshold (become less picky)
                 percentile = (1 - self.max_rejection_rate) * 100
                 self.min_diversity = np.percentile(self.diversity_scores[-100:], percentile)
+            elif current_rejection_rate < 0.05:  # Rejecting less than 5%
+                # Raise threshold (become more picky)
+                # If we're accepting almost everything, try to reject at least the bottom 10%
+                # This helps filter out empty chunks or very repetitive terrain
+                self.min_diversity = max(self.min_diversity, np.percentile(self.diversity_scores[-100:], 10))
         
         # Accept if diversity is above threshold
         accept = stats.diversity_score >= self.min_diversity
@@ -314,25 +320,40 @@ class BalancedBatchSampler:
 
 
 def deduplicate_chunks(chunks: List[torch.Tensor], 
-                       similarity_threshold: float = 0.95) -> List[torch.Tensor]:
+                       stats_list: Optional[List[ChunkStats]] = None,
+                       similarity_threshold: float = 0.95) -> Union[List[torch.Tensor], Tuple[List[torch.Tensor], List[ChunkStats]]]:
     """
     Remove near-duplicate chunks using simple hash comparison.
     
     Args:
         chunks: List of chunk tensors
+        stats_list: Optional list of chunk statistics to filter in parallel
         similarity_threshold: Similarity threshold for deduplication
         
     Returns:
-        Deduplicated list of chunks
+        Deduplicated list of chunks, or (chunks, stats) if stats_list provided
     """
+    # Handle the case where stats_list is passed as the second positional argument but the caller 
+    # intended it to be similarity_threshold (backward compatibility or cross-file confusion)
+    # However, in this case, the caller (dataset_optimized.py) passed stats_list as 2nd arg
+    # intentionally expecting it to be handled, while dataset.py passes similarity_threshold as kwarg.
+    
+    # If the second argument is a float (and not a list), treat it as similarity_threshold
+    if isinstance(stats_list, (float, int)) and not isinstance(stats_list, list):
+        similarity_threshold = float(stats_list)
+        stats_list = None
+
     if not chunks:
+        if stats_list is not None:
+             return [], []
         return []
     
     # Use block type histogram as fingerprint
     fingerprints = []
     unique_chunks = []
+    unique_stats = []
     
-    for chunk in chunks:
+    for i, chunk in enumerate(chunks):
         if isinstance(chunk, torch.Tensor):
             chunk_np = chunk.cpu().numpy()
         else:
@@ -359,5 +380,9 @@ def deduplicate_chunks(chunks: List[torch.Tensor],
         if not is_duplicate:
             fingerprints.append(fingerprint)
             unique_chunks.append(chunk)
+            if stats_list is not None and i < len(stats_list):
+                 unique_stats.append(stats_list[i])
     
+    if stats_list is not None:
+        return unique_chunks, unique_stats
     return unique_chunks

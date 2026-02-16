@@ -141,7 +141,7 @@ def format_tile_readable(tile_data: Dict[str, Any], verbose: bool = False) -> st
     return " | ".join(parts) if parts else "Empty tile"
 
 
-def compare_tiles(original: np.ndarray, reconstructed: np.ndarray, position: tuple = None) -> str:
+def compare_tiles(original: np.ndarray, reconstructed: np.ndarray, position: tuple[int, int] | None = None) -> str:
     """
     Compare original and reconstructed tile tensors and return a formatted comparison.
     

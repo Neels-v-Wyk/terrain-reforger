@@ -210,3 +210,10 @@ __marimo__/
 downloads/*
 worldgen/*
 logs/*
+
+# Terrain Reforger generated artifacts
+checkpoints/
+models/
+data/
+training_metrics.png
+component_losses.png

@@ -147,7 +147,7 @@ class CheckpointManager:
     def load_checkpoint(
         self,
         model: torch.nn.Module,
-        checkpoint_path: Optional[str] = None,
+        checkpoint_path: Optional[str | Path] = None,
         optimizer: Optional[torch.optim.Optimizer] = None,
         device: str = 'cpu'
     ) -> Tuple[torch.nn.Module, Optional[torch.optim.Optimizer], Dict[str, Any], int]:
@@ -244,7 +244,7 @@ def save_final_model(
     optimizer: torch.optim.Optimizer,
     results: Dict[str, Any],
     config: Dict[str, Any],
-    save_dir: str = "models"
+    save_dir: str | Path = "models"
 ) -> Path:
     """
     Save final trained model with metadata.
@@ -312,7 +312,7 @@ def save_final_model(
 
 def load_model_for_inference(
     model: torch.nn.Module,
-    model_path: str,
+    model_path: str | Path,
     device: str = 'cpu'
 ) -> torch.nn.Module:
     """
