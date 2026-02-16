@@ -1,10 +1,18 @@
 [project]
-name = "tarrain-reforger"
+name = "terrain-reforger"
 version = "0.1.0"
 description = "ML assisted terrain generation for Terraria"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "lihzahrd>=3.1.0",
+    "matplotlib>=3.10.8",
     "numpy>=2.4.2",
+    "rich>=14.1.0",
+    "torch>=2.10.0",
+    "typer>=0.16.1",
+    "tqdm>=4.67.3",
 ]
+
+[project.scripts]
+terrain = "src.cli:main"
