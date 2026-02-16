@@ -13,9 +13,9 @@ Based on analysis of 463M tiles from 23 worlds, this version:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Tuple
+from typing import Tuple, Optional
 
-from .quantizer import VectorQuantizer
+from .quantizer import VectorQuantizer, VectorQuantizerEMA
 from .encoder import Encoder
 from .decoder import Decoder
 from ..terraria.natural_ids import (
@@ -184,11 +184,17 @@ class VQVAEOptimized(nn.Module):
         h_dim: int = 128,
         res_h_dim: int = 64,
         n_embeddings: int = 512,
-        beta: float = 0.25
+        beta: float = 0.25,
+        use_ema: bool = True,
+        ema_decay: float = 0.99,
+        ema_reset_threshold: float = 0.01,
+        ema_reset_interval: int = 100,
     ):
         super().__init__()
         
         self.embedding_dim = embedding_dim
+        self.use_ema = use_ema
+        self.n_embeddings = n_embeddings
         
         # Tile-specific encoder/decoder
         self.tile_encoder = OptimizedTileEncoder(embedding_dim)
@@ -197,8 +203,18 @@ class VQVAEOptimized(nn.Module):
         # Standard convolutional encoder
         self.conv_encoder = Encoder(encoder_output_dim, h_dim, 2, res_h_dim)
         
-        # Vector quantizer
-        self.vq = VectorQuantizer(n_embeddings, h_dim, beta)
+        # Vector quantizer - use EMA version by default to prevent codebook collapse
+        if use_ema:
+            self.vq = VectorQuantizerEMA(
+                n_e=n_embeddings,
+                e_dim=h_dim,
+                beta=beta,
+                decay=ema_decay,
+                reset_threshold=ema_reset_threshold,
+                reset_interval=ema_reset_interval,
+            )
+        else:
+            self.vq = VectorQuantizer(n_embeddings, h_dim, beta)
         
         # Standard convolutional decoder  
         self.conv_decoder = Decoder(h_dim, res_h_dim, 2, res_h_dim, out_dim=res_h_dim)
@@ -238,6 +254,22 @@ class VQVAEOptimized(nn.Module):
         """Reconstruct without computing losses."""
         _, x_hat, _, _ = self.forward(x)
         return x_hat
+    
+    def get_codebook_usage_stats(self) -> Optional[dict]:
+        """
+        Get detailed codebook usage statistics.
+        
+        Only available when using EMA quantizer.
+        
+        Returns:
+            Dictionary with usage stats, or None if not using EMA.
+        """
+        if self.use_ema and hasattr(self.vq, 'get_codebook_usage_stats'):
+            stats = self.vq.get_codebook_usage_stats()
+            stats['codebook_size'] = self.n_embeddings
+            stats['usage_percent'] = stats['active_codes'] / self.n_embeddings * 100
+            return stats
+        return None
 
 
 def compute_optimized_loss(

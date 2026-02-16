@@ -29,6 +29,10 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", type=str, help="Resume from checkpoint")
     parser.add_argument("--disk-mode", action="store_true", help="Use disk-based loading with LRU cache (saves RAM)")
     parser.add_argument("--cache-size", type=int, default=5, help="LRU cache size (files) for disk mode")
+    # EMA quantizer options
+    parser.add_argument("--no-ema", action="store_true", help="Disable EMA codebook updates (use vanilla VQ-VAE)")
+    parser.add_argument("--ema-decay", type=float, default=0.99, help="EMA decay rate (default: 0.99)")
+    parser.add_argument("--beta", type=float, default=0.25, help="Commitment loss weight (default: 0.25)")
     return parser
 
 
@@ -47,7 +51,12 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "h_dim": 128,
         "res_h_dim": 64,
         "n_embeddings": 512,
-        "beta": 0.25,
+        "beta": args.beta,
+        # EMA settings to prevent codebook collapse
+        "use_ema": not args.no_ema,
+        "ema_decay": args.ema_decay,
+        "ema_reset_threshold": 0.01,  # Reinitialize codes used <1% of time
+        "ema_reset_interval": 100,     # Check for dead codes every 100 batches
     }
 
     batch_size = args.batch_size
@@ -117,6 +126,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print("  Model: Optimized VQ-VAE (9 channels, 218 blocks, 77 walls)")
     print(f"  Embedding dim: {model_config['embedding_dim']}")
     print(f"  Codebook size: {model_config['n_embeddings']}")
+    print(f"  Quantizer: {'EMA' if model_config['use_ema'] else 'Vanilla'} (beta={model_config['beta']})")
+    if model_config['use_ema']:
+        print(f"  EMA decay: {model_config['ema_decay']}")
+        print(f"  Dead code reset threshold: {model_config['ema_reset_threshold']*100:.0f}%")
 
     model = VQVAEOptimized(**model_config).to(device)
     optimizer = Adam(model.parameters(), lr=learning_rate)
@@ -237,7 +250,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print(f"    Continuous: {avg_losses['continuous']:.4f}")
         print(f"  Embedding: {avg_losses['embedding']:.4f}")
         print(f"  Perplexity: {avg_perplexity:.2f}")
-        print(f"  Codebook usage: {(avg_perplexity / model_config['n_embeddings']) * 100:.1f}%")
+        print(f"  Codebook usage (perplexity-based): {(avg_perplexity / model_config['n_embeddings']) * 100:.1f}%")
+        
+        # Show detailed codebook stats if using EMA quantizer
+        usage_stats = model.get_codebook_usage_stats()
+        if usage_stats:
+            print(f"  Codebook stats (EMA tracked):")
+            print(f"    Active codes: {usage_stats['active_codes']}/{model_config['n_embeddings']} ({usage_stats['usage_percent']:.1f}%)")
+            print(f"    Dead codes: {usage_stats['dead_codes']}")
         print(f"{'=' * 80}\n")
 
         plot_training_results(results, "checkpoints")
