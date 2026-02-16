@@ -1,17 +1,6 @@
 # terrain-reforger (WIP)
 A Terraria terrain generation tool using Discrete Diffusion and Content Aware Inpainting with PyTorch
 
-## Canonical commands
-
-```bash
-uv pip install -e .
-terrain data prepare --mode consolidated --source worldgen --output data/dataset_optimized.pt
-terrain data prepare --mode chunked --source worldgen --output-dir data/cache
-terrain data analyze --source-dir worldgen --output src/terraria/natural_ids.py
-terrain model train --data data/dataset_optimized.pt --epochs 50
-terrain model infer checkpoints/best_model.pt
-```
-
 ## Notes
 
 - Checkpoints, latest model, and training plots are written under `checkpoints/`.
