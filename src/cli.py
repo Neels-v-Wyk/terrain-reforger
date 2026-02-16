@@ -131,9 +131,10 @@ def data_analyze_command(
 @data_app.command("worldgen")
 def data_worldgen_command(
     num_worlds: int = typer.Option(20, "--num-worlds", help="Number of worlds to generate"),
+    parallel: int = typer.Option(1, "--parallel", help="Number of parallel generation jobs (max 4)"),
 ) -> None:
     """Generate Terraria worlds through the internal worldgen script."""
-    exit_code = worldgen_main(["--num-worlds", str(num_worlds)])
+    exit_code = worldgen_main(["--num-worlds", str(num_worlds), "--parallel", str(parallel)])
     if exit_code != 0:
         raise typer.Exit(code=exit_code)
 

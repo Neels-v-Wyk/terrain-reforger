@@ -22,7 +22,11 @@ import numpy as np
 import torch
 import os
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device(
+    "cuda" if torch.cuda.is_available() 
+    else "mps" if torch.backends.mps.is_available() 
+    else "cpu"
+)
 
 N_UPDATES = 10000
 CHECKPOINT_INTERVAL = 500  # Save checkpoint every N updates
