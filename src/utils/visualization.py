@@ -8,20 +8,18 @@ from src.terraria.tensor_utils import BLOCK_NAMES, WALL_NAMES, LIQUID_TYPES, BLO
 def plot_training_results(results: Dict[str, List[float]], save_dir: str):
     """
     Plot training metrics and save to file.
-    Uses logarithmic scale for loss values that span large ranges.
     """
     os.makedirs(save_dir, exist_ok=True)
     
     # Plot Total Loss and Perplexity
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
     
-    # Loss (log scale)
+    # Loss
     ax1.plot(results['loss_vals'], label='Total Loss')
     ax1.set_title('Training Loss')
     ax1.set_xlabel('Updates')
-    ax1.set_ylabel('Loss (log scale)')
-    ax1.set_yscale('log')
-    ax1.grid(True, alpha=0.3, which='both')
+    ax1.set_ylabel('Loss')
+    ax1.grid(True, alpha=0.3)
     ax1.legend()
     
     # Perplexity
@@ -36,7 +34,7 @@ def plot_training_results(results: Dict[str, List[float]], save_dir: str):
     plt.savefig(os.path.join(save_dir, 'training_metrics.png'))
     plt.close()
     
-    # Plot Component Losses (log scale)
+    # Plot Component Losses
     plt.figure(figsize=(10, 6))
     if 'block_loss' in results:
         plt.plot(results['block_loss'], label='Block Loss', alpha=0.7)
@@ -49,9 +47,8 @@ def plot_training_results(results: Dict[str, List[float]], save_dir: str):
         
     plt.title('Component Losses')
     plt.xlabel('Updates')
-    plt.ylabel('Loss (log scale)')
-    plt.yscale('log')
-    plt.grid(True, alpha=0.3, which='both')
+    plt.ylabel('Loss')
+    plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(save_dir, 'component_losses.png'))
