@@ -46,6 +46,23 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--beta", type=float, default=0.25, help="Commitment loss weight (default: 0.25)")
     parser.add_argument(
+        "--block-loss-weighted",
+        action="store_true",
+        help="Use inverse-frequency class weighting for block-type cross entropy",
+    )
+    parser.add_argument(
+        "--block-weight-min",
+        type=float,
+        default=0.5,
+        help="Minimum class weight clamp for weighted block loss (default: 0.5)",
+    )
+    parser.add_argument(
+        "--block-weight-max",
+        type=float,
+        default=5.0,
+        help="Maximum class weight clamp for weighted block loss (default: 5.0)",
+    )
+    parser.add_argument(
         "--metrics-stride",
         type=int,
         default=50,
@@ -146,6 +163,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(f"  Embedding dim: {model_config['embedding_dim']}")
     print(f"  Codebook size: {model_config['n_embeddings']}")
     print(f"  Quantizer: {'EMA' if model_config['use_ema'] else 'Vanilla'} (beta={model_config['beta']})")
+    print(
+        f"  Block loss weighting: {'enabled' if args.block_loss_weighted else 'disabled'} "
+        f"(min={args.block_weight_min}, max={args.block_weight_max})"
+    )
     if model_config['use_ema']:
         dead_usage_rate = model_config['ema_reset_threshold'] / model_config['n_embeddings']
         print(f"  EMA decay: {model_config['ema_decay']}")
@@ -164,6 +185,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "loss_vals": [],
         "perplexities": [],
         "block_loss": [],
+        "shape_loss": [],
         "wall_loss": [],
         "liquid_loss": [],
         "continuous_loss": [],
@@ -172,6 +194,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
 
     start_epoch = 0
     best_loss = float("inf")
+    update_count = 0
 
     resume_path = args.resume or os.environ.get("RESUME_CHECKPOINT")
     if resume_path and Path(resume_path).exists():
@@ -186,6 +209,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             optimizer = loaded_optimizer
         best_loss = min(results.get("loss_vals", [float("inf")]))
         update_count = int(results.get("n_updates", 0))
+        results.setdefault("shape_loss", [])
+        results.setdefault("n_updates", update_count)
         print(f"  Resumed from epoch {start_epoch}")
 
     print("\n" + "=" * 80)
@@ -193,7 +218,6 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print("=" * 80)
 
     model.train()
-    update_count = 0
     last_batch: Optional[torch.Tensor] = None
     last_reconstruction: Optional[torch.Tensor] = None
 
@@ -203,6 +227,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             "reconstruction": [],
             "categorical": [],
             "block": [],
+            "shape": [],
             "wall": [],
             "liquid": [],
             "continuous": [],
@@ -217,7 +242,15 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             embedding_loss, x_hat, perplexity, logits = model(batch)
             last_reconstruction = x_hat
 
-            total_loss, loss_dict = compute_optimized_loss(batch, x_hat, logits, embedding_loss)
+            total_loss, loss_dict = compute_optimized_loss(
+                batch,
+                x_hat,
+                logits,
+                embedding_loss,
+                block_loss_weighted=args.block_loss_weighted,
+                block_weight_min=args.block_weight_min,
+                block_weight_max=args.block_weight_max,
+            )
 
             optimizer.zero_grad()
             total_loss.backward()
@@ -235,6 +268,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 results["loss_vals"].append(loss_dict["total"])
                 results["perplexities"].append(perplexity.item())
                 results["block_loss"].append(loss_dict["block"])
+                results["shape_loss"].append(loss_dict["shape"])
                 results["wall_loss"].append(loss_dict["wall"])
                 results["liquid_loss"].append(loss_dict["liquid"])
                 results["continuous_loss"].append(loss_dict["continuous"])
@@ -275,6 +309,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         print(f"  Reconstruction: {avg_losses['reconstruction']:.4f}")
         print(f"    Categorical: {avg_losses['categorical']:.4f}")
         print(f"      Block: {avg_losses['block']:.4f}")
+        print(f"      Shape: {avg_losses['shape']:.4f}")
         print(f"      Wall: {avg_losses['wall']:.4f}")
         print(f"      Liquid: {avg_losses['liquid']:.4f}")
         print(f"    Continuous: {avg_losses['continuous']:.4f}")

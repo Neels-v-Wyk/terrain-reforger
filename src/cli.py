@@ -60,6 +60,9 @@ def _run_train(
     ema_reset_multiplier: float = typer.Option(0.5, "--ema-reset-multiplier", help="Dead-code threshold multiplier relative to uniform usage"),
     ema_reset_interval: int = typer.Option(500, "--ema-reset-interval", help="EMA dead-code reset interval in updates"),
     beta: float = typer.Option(0.25, "--beta", help="Commitment loss weight"),
+    block_loss_weighted: bool = typer.Option(False, "--block-loss-weighted", help="Use inverse-frequency block loss weighting"),
+    block_weight_min: float = typer.Option(0.5, "--block-weight-min", help="Minimum block class weight clamp"),
+    block_weight_max: float = typer.Option(5.0, "--block-weight-max", help="Maximum block class weight clamp"),
     no_ema: bool = typer.Option(False, "--no-ema", help="Disable EMA quantizer"),
     metrics_stride: int = typer.Option(50, "--metrics-stride", help="Store metrics every N updates"),
 ) -> None:
@@ -82,6 +85,10 @@ def _run_train(
     argv.extend(["--ema-reset-multiplier", str(ema_reset_multiplier)])
     argv.extend(["--ema-reset-interval", str(ema_reset_interval)])
     argv.extend(["--beta", str(beta)])
+    if block_loss_weighted:
+        argv.append("--block-loss-weighted")
+    argv.extend(["--block-weight-min", str(block_weight_min)])
+    argv.extend(["--block-weight-max", str(block_weight_max)])
     if no_ema:
         argv.append("--no-ema")
     argv.extend(["--metrics-stride", str(metrics_stride)])
@@ -206,6 +213,9 @@ def model_train_command(
     ema_reset_multiplier: float = typer.Option(0.5, "--ema-reset-multiplier", help="Dead-code threshold multiplier relative to uniform usage"),
     ema_reset_interval: int = typer.Option(500, "--ema-reset-interval", help="EMA dead-code reset interval in updates"),
     beta: float = typer.Option(0.25, "--beta", help="Commitment loss weight"),
+    block_loss_weighted: bool = typer.Option(False, "--block-loss-weighted", help="Use inverse-frequency block loss weighting"),
+    block_weight_min: float = typer.Option(0.5, "--block-weight-min", help="Minimum block class weight clamp"),
+    block_weight_max: float = typer.Option(5.0, "--block-weight-max", help="Maximum block class weight clamp"),
     no_ema: bool = typer.Option(False, "--no-ema", help="Disable EMA quantizer"),
     metrics_stride: int = typer.Option(50, "--metrics-stride", help="Store metrics every N updates"),
 ) -> None:
@@ -223,6 +233,9 @@ def model_train_command(
         ema_reset_multiplier,
         ema_reset_interval,
         beta,
+        block_loss_weighted,
+        block_weight_min,
+        block_weight_max,
         no_ema,
         metrics_stride,
     )

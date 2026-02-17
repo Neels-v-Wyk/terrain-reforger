@@ -38,6 +38,8 @@ def plot_training_results(results: Dict[str, List[float]], save_dir: str):
     plt.figure(figsize=(10, 6))
     if 'block_loss' in results:
         plt.plot(results['block_loss'], label='Block Loss', alpha=0.7)
+    if 'shape_loss' in results:
+        plt.plot(results['shape_loss'], label='Shape Loss', alpha=0.7)
     if 'wall_loss' in results:
         plt.plot(results['wall_loss'], label='Wall Loss', alpha=0.7)
     if 'liquid_loss' in results:
@@ -69,7 +71,7 @@ def decode_optimized_tile(tensor_slice: np.ndarray) -> Dict[str, Any]:
     block_id = BLOCK_INDEX_TO_ID.get(block_idx, 0)
     
     # 1: Block Shape (continuous/categorical)
-    block_shape = int(round(tensor_slice[1]))
+    block_shape = int(round(float(tensor_slice[1]) * 5.0))
     
     # 2: Wall Type Index (needs mapping)
     wall_idx = int(round(tensor_slice[2]))

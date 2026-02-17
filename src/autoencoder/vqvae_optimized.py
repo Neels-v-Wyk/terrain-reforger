@@ -41,6 +41,7 @@ CHANNEL_ACTUATOR = 8
 NUM_NATURAL_BLOCKS = len(NATURAL_BLOCK_IDS)  # 218
 NUM_NATURAL_WALLS = len(NATURAL_WALL_IDS)    # 77
 NUM_LIQUID_TYPES = 5  # 0=none, 1=water, 2=lava, 3=honey, 4=shimmer
+NUM_BLOCK_SHAPES = 6  # 0=full, 1=half, 2..5 sloped variants
 
 
 class OptimizedTileEncoder(nn.Module):
@@ -130,13 +131,17 @@ class OptimizedTileDecoder(nn.Module):
         
         # Classification heads for categorical features
         self.block_classifier = nn.Conv2d(input_dim, NUM_NATURAL_BLOCKS, 1)
+        self.block_shape_classifier = nn.Conv2d(input_dim, NUM_BLOCK_SHAPES, 1)
         self.wall_classifier = nn.Conv2d(input_dim, NUM_NATURAL_WALLS, 1)
         self.liquid_classifier = nn.Conv2d(input_dim, NUM_LIQUID_TYPES, 1)
         
-        # Regression head for continuous features (6 channels)
-        self.continuous_head = nn.Conv2d(input_dim, 6, 1)
-    
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+        # Regression head for continuous features (5 channels)
+        # liquid_present + wires(3) + actuator
+        self.continuous_head = nn.Conv2d(input_dim, 5, 1)
+
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]]:
         """
         Args:
             x: (B, input_dim, H, W) latent features
@@ -144,10 +149,11 @@ class OptimizedTileDecoder(nn.Module):
         Returns:
             Tuple of:
             - reconstructed: (B, 9, H, W) reconstructed tile tensor
-            - logits: Tuple of (block_logits, wall_logits, liquid_logits)
+            - logits: Tuple of (block_logits, block_shape_logits, wall_logits, liquid_logits)
         """
         # Get logits for categorical features
         block_logits = self.block_classifier(x)  # (B, 218, H, W)
+        block_shape_logits = self.block_shape_classifier(x)  # (B, 6, H, W)
         wall_logits = self.wall_classifier(x)    # (B, 77, H, W)
         liquid_logits = self.liquid_classifier(x)  # (B, 5, H, W)
         
@@ -156,23 +162,24 @@ class OptimizedTileDecoder(nn.Module):
         
         # For categorical channels, use argmax to get predicted class
         block_pred = torch.argmax(block_logits, dim=1, keepdim=True).float()  # (B, 1, H, W)
+        block_shape_pred = torch.argmax(block_shape_logits, dim=1, keepdim=True).float() / 5.0
         wall_pred = torch.argmax(wall_logits, dim=1, keepdim=True).float()
         liquid_pred = torch.argmax(liquid_logits, dim=1, keepdim=True).float()
         
         # Reconstruct 9-channel tensor
         reconstructed = torch.cat([
             block_pred,                      # Channel 0: block type (index)
-            continuous[:, 0:1, :, :],        # Channel 1: block shape
+            block_shape_pred,                # Channel 1: block shape (normalized 0..1)
             wall_pred,                       # Channel 2: wall type (index)
-            continuous[:, 1:2, :, :],        # Channel 3: liquid present
+            continuous[:, 0:1, :, :],        # Channel 3: liquid present
             liquid_pred,                     # Channel 4: liquid type
-            continuous[:, 2:3, :, :],        # Channel 5: wire red
-            continuous[:, 3:4, :, :],        # Channel 6: wire blue
-            continuous[:, 4:5, :, :],        # Channel 7: wire green
-            continuous[:, 5:6, :, :],        # Channel 8: actuator
+            continuous[:, 1:2, :, :],        # Channel 5: wire red
+            continuous[:, 2:3, :, :],        # Channel 6: wire blue
+            continuous[:, 3:4, :, :],        # Channel 7: wire green
+            continuous[:, 4:5, :, :],        # Channel 8: actuator
         ], dim=1)  # (B, 9, H, W)
-        
-        return reconstructed, (block_logits, wall_logits, liquid_logits)
+
+        return reconstructed, (block_logits, block_shape_logits, wall_logits, liquid_logits)
 
 
 class VQVAEOptimized(nn.Module):
@@ -222,7 +229,14 @@ class VQVAEOptimized(nn.Module):
         # Tile-specific decoder
         self.tile_decoder = OptimizedTileDecoder(res_h_dim)
     
-    def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor, torch.Tensor]]:
+    def forward(
+        self, x: torch.Tensor
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    ]:
         """
         Args:
             x: (B, 9, H, W) input tile tensor
@@ -231,7 +245,7 @@ class VQVAEOptimized(nn.Module):
             embedding_loss: VQ loss
             x_hat: (B, 9, H, W) reconstructed tiles
             perplexity: Codebook usage metric
-            logits: Tuple of (block_logits, wall_logits, liquid_logits) for loss computation
+            logits: Tuple of (block_logits, block_shape_logits, wall_logits, liquid_logits) for loss computation
         """
         # Encode with tile-specific embeddings
         tile_encoded = self.tile_encoder(x)  # (B, 102, H, W)
@@ -275,8 +289,12 @@ class VQVAEOptimized(nn.Module):
 def compute_optimized_loss(
     x: torch.Tensor,
     x_hat: torch.Tensor,
-    logits: Tuple[torch.Tensor, torch.Tensor, torch.Tensor],
-    embedding_loss: torch.Tensor
+    logits: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    embedding_loss: torch.Tensor,
+    block_loss_weighted: bool = False,
+    block_weight_min: float = 0.5,
+    block_weight_max: float = 5.0,
+    binary_loss_weight: float = 1.0,
 ) -> Tuple[torch.Tensor, dict]:
     """
     Compute loss for optimized model.
@@ -284,41 +302,61 @@ def compute_optimized_loss(
     Args:
         x: Original input (B, 9, H, W)
         x_hat: Reconstruction (B, 9, H, W)
-        logits: Tuple of (block_logits, wall_logits, liquid_logits)
+        logits: Tuple of (block_logits, block_shape_logits, wall_logits, liquid_logits)
         embedding_loss: VQ embedding loss
+        block_loss_weighted: Whether to use inverse-frequency class weights for block CE
+        block_weight_min: Minimum class weight clamp when weighted CE is enabled
+        block_weight_max: Maximum class weight clamp when weighted CE is enabled
+        binary_loss_weight: Weight applied to BCE over binary channels
         
     Returns:
         total_loss: Combined loss
         loss_dict: Dictionary of individual loss components
     """
-    block_logits, wall_logits, liquid_logits = logits
+    block_logits, block_shape_logits, wall_logits, liquid_logits = logits
     
     # Extract ground truth
     block_target = x[:, CHANNEL_BLOCK_TYPE, :, :].long()
+    # Stored as normalized 0..1; convert to categorical class index 0..5
+    block_shape_target = torch.round(x[:, CHANNEL_BLOCK_SHAPE, :, :] * 5.0).long()
     wall_target = x[:, CHANNEL_WALL_TYPE, :, :].long()
     liquid_target = x[:, CHANNEL_LIQUID_TYPE, :, :].long()
     
     # Clamp targets
     block_target = torch.clamp(block_target, 0, NUM_NATURAL_BLOCKS - 1)
+    block_shape_target = torch.clamp(block_shape_target, 0, NUM_BLOCK_SHAPES - 1)
     wall_target = torch.clamp(wall_target, 0, NUM_NATURAL_WALLS - 1)
     liquid_target = torch.clamp(liquid_target, 0, NUM_LIQUID_TYPES - 1)
     
     # Categorical losses (cross-entropy)
-    block_loss = F.cross_entropy(block_logits, block_target)
+    if block_loss_weighted:
+        counts = torch.bincount(block_target.reshape(-1), minlength=NUM_NATURAL_BLOCKS).float()
+        block_weights = 1.0 / torch.sqrt(counts + 1.0)
+        block_weights = block_weights / block_weights.mean().clamp_min(1e-6)
+        block_weights = torch.clamp(block_weights, block_weight_min, block_weight_max)
+        block_weights = block_weights.to(block_logits.device)
+        block_loss = F.cross_entropy(block_logits, block_target, weight=block_weights)
+    else:
+        block_loss = F.cross_entropy(block_logits, block_target)
+
+    block_shape_loss = F.cross_entropy(block_shape_logits, block_shape_target)
     wall_loss = F.cross_entropy(wall_logits, wall_target)
     liquid_loss = F.cross_entropy(liquid_logits, liquid_target)
     
-    # Continuous losses (MSE) for channels 1,3,5,6,7,8
-    continuous_indices = [CHANNEL_BLOCK_SHAPE, CHANNEL_LIQUID_PRESENT, 
-                         CHANNEL_WIRE_RED, CHANNEL_WIRE_BLUE, 
-                         CHANNEL_WIRE_GREEN, CHANNEL_ACTUATOR]
-    continuous_loss = F.mse_loss(
-        x_hat[:, continuous_indices, :, :],
-        x[:, continuous_indices, :, :]
-    )
+    # Binary-channel loss (BCE) for channels 3,5,6,7,8
+    binary_indices = [
+        CHANNEL_LIQUID_PRESENT,
+        CHANNEL_WIRE_RED,
+        CHANNEL_WIRE_BLUE,
+        CHANNEL_WIRE_GREEN,
+        CHANNEL_ACTUATOR,
+    ]
+    binary_pred = torch.clamp(x_hat[:, binary_indices, :, :], 1e-6, 1 - 1e-6)
+    binary_target = x[:, binary_indices, :, :]
+    continuous_loss = binary_loss_weight * F.binary_cross_entropy(binary_pred, binary_target)
     
     # Weighted combination
-    categorical_loss = block_loss + wall_loss + liquid_loss
+    categorical_loss = block_loss + block_shape_loss + wall_loss + liquid_loss
     reconstruction_loss = categorical_loss + continuous_loss
     total_loss = reconstruction_loss + embedding_loss
     
@@ -327,9 +365,11 @@ def compute_optimized_loss(
         'reconstruction': reconstruction_loss.item(),
         'categorical': categorical_loss.item(),
         'block': block_loss.item(),
+        'shape': block_shape_loss.item(),
         'wall': wall_loss.item(),
         'liquid': liquid_loss.item(),
         'continuous': continuous_loss.item(),
+        'binary': continuous_loss.item(),
         'embedding': embedding_loss.item()
     }
     
