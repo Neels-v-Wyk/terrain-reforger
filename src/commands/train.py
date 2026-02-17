@@ -32,7 +32,25 @@ def _build_parser() -> argparse.ArgumentParser:
     # EMA quantizer options
     parser.add_argument("--no-ema", action="store_true", help="Disable EMA codebook updates (use vanilla VQ-VAE)")
     parser.add_argument("--ema-decay", type=float, default=0.99, help="EMA decay rate (default: 0.99)")
+    parser.add_argument(
+        "--ema-reset-multiplier",
+        type=float,
+        default=0.5,
+        help="Dead-code reset threshold as multiplier of uniform usage (default: 0.5)",
+    )
+    parser.add_argument(
+        "--ema-reset-interval",
+        type=int,
+        default=500,
+        help="How often (updates) to check/reset dead codes (default: 500)",
+    )
     parser.add_argument("--beta", type=float, default=0.25, help="Commitment loss weight (default: 0.25)")
+    parser.add_argument(
+        "--metrics-stride",
+        type=int,
+        default=50,
+        help="Store metrics every N updates to reduce checkpoint JSON size (default: 50)",
+    )
     return parser
 
 
@@ -55,8 +73,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         # EMA settings to prevent codebook collapse
         "use_ema": not args.no_ema,
         "ema_decay": args.ema_decay,
-        "ema_reset_threshold": 0.01,  # Reinitialize codes used <1% of time
-        "ema_reset_interval": 100,     # Check for dead codes every 100 batches
+        # Reinitialize codes used less than (multiplier / n_embeddings)
+        "ema_reset_threshold": args.ema_reset_multiplier,
+        "ema_reset_interval": args.ema_reset_interval,
     }
 
     batch_size = args.batch_size
@@ -128,8 +147,14 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(f"  Codebook size: {model_config['n_embeddings']}")
     print(f"  Quantizer: {'EMA' if model_config['use_ema'] else 'Vanilla'} (beta={model_config['beta']})")
     if model_config['use_ema']:
+        dead_usage_rate = model_config['ema_reset_threshold'] / model_config['n_embeddings']
         print(f"  EMA decay: {model_config['ema_decay']}")
-        print(f"  Dead code reset threshold: {model_config['ema_reset_threshold']*100:.0f}%")
+        print(
+            f"  Dead code reset threshold: {model_config['ema_reset_threshold']:.2f} x uniform "
+            f"({dead_usage_rate * 100:.4f}% usage rate)"
+        )
+        print(f"  Dead code reset interval: every {model_config['ema_reset_interval']} updates")
+    print(f"  Metrics stride: every {args.metrics_stride} updates")
 
     model = VQVAEOptimized(**model_config).to(device)
     optimizer = Adam(model.parameters(), lr=learning_rate)
@@ -142,6 +167,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         "wall_loss": [],
         "liquid_loss": [],
         "continuous_loss": [],
+        "n_updates": 0,
     }
 
     start_epoch = 0
@@ -159,6 +185,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
         if loaded_optimizer is not None:
             optimizer = loaded_optimizer
         best_loss = min(results.get("loss_vals", [float("inf")]))
+        update_count = int(results.get("n_updates", 0))
         print(f"  Resumed from epoch {start_epoch}")
 
     print("\n" + "=" * 80)
@@ -200,14 +227,17 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
                 epoch_losses[key].append(loss_dict[key])
             epoch_perplexities.append(perplexity.item())
 
-            results["loss_vals"].append(loss_dict["total"])
-            results["perplexities"].append(perplexity.item())
-            results["block_loss"].append(loss_dict["block"])
-            results["wall_loss"].append(loss_dict["wall"])
-            results["liquid_loss"].append(loss_dict["liquid"])
-            results["continuous_loss"].append(loss_dict["continuous"])
-
             update_count += 1
+            results["n_updates"] = update_count
+
+            should_store_metrics = (update_count % args.metrics_stride == 0) or (batch_idx == len(train_loader) - 1)
+            if should_store_metrics:
+                results["loss_vals"].append(loss_dict["total"])
+                results["perplexities"].append(perplexity.item())
+                results["block_loss"].append(loss_dict["block"])
+                results["wall_loss"].append(loss_dict["wall"])
+                results["liquid_loss"].append(loss_dict["liquid"])
+                results["continuous_loss"].append(loss_dict["continuous"])
 
             if update_count % checkpoint_interval == 0:
                 avg_loss = sum(epoch_losses["total"][-checkpoint_interval:]) / min(
@@ -258,6 +288,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             print(f"  Codebook stats (EMA tracked):")
             print(f"    Active codes: {usage_stats['active_codes']}/{model_config['n_embeddings']} ({usage_stats['usage_percent']:.1f}%)")
             print(f"    Dead codes: {usage_stats['dead_codes']}")
+            print(
+                f"    Active > 1/n: {usage_stats['active_codes_above_uniform']}/{model_config['n_embeddings']} | "
+                f"Active > 0.5/n: {usage_stats['active_codes_above_half_uniform']}/{model_config['n_embeddings']}"
+            )
+            print(f"    Usage entropy (normalized): {usage_stats['entropy_normalized']:.3f}")
+            print(
+                f"    Top code share: {usage_stats['top1_share'] * 100:.2f}% | "
+                f"Top-5: {usage_stats['top5_share'] * 100:.2f}% | "
+                f"Top-10: {usage_stats['top10_share'] * 100:.2f}%"
+            )
         print(f"{'=' * 80}\n")
 
         plot_training_results(results, "checkpoints")

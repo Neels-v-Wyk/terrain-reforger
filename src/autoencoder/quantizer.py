@@ -84,7 +84,7 @@ class VectorQuantizerEMA(nn.Module):
     """
     Vector Quantizer with Exponential Moving Average (EMA) updates.
     
-    This implementation prevents codebook collapse by:
+    This implementation helps prevent codebook collapse by:
     1. Using EMA to update embeddings instead of gradient descent
     2. Tracking usage of each code and reinitializing dead codes
     3. Using Laplace smoothing for cluster size estimation
@@ -97,7 +97,8 @@ class VectorQuantizerEMA(nn.Module):
         beta: Commitment cost weight (only for commitment loss, not codebook)
         decay: EMA decay rate (0.99 is typical, higher = slower updates)
         eps: Epsilon for Laplace smoothing to avoid division by zero
-        reset_threshold: Reinitialize codes used less than this fraction
+        reset_threshold: Dead-code threshold multiplier relative to uniform usage
+            (uniform usage is 1 / n_e; dead if usage_rate < reset_threshold / n_e)
         reset_interval: How often (in forward passes) to check for dead codes
     """
     
@@ -108,8 +109,8 @@ class VectorQuantizerEMA(nn.Module):
         beta: float = 0.25,
         decay: float = 0.99,
         eps: float = 1e-5,
-        reset_threshold: float = 0.01,
-        reset_interval: int = 100
+        reset_threshold: float = 0.5,
+        reset_interval: int = 500
     ):
         super().__init__()
         
@@ -136,6 +137,19 @@ class VectorQuantizerEMA(nn.Module):
         
         # Track codes that have been used at least once (for initialization)
         self.register_buffer("initialized", torch.zeros(n_e, dtype=torch.bool))
+
+    def _uniform_usage_rate(self) -> float:
+        """Expected usage per code under perfectly uniform assignment."""
+        return 1.0 / float(self.n_e)
+
+    def _dead_usage_threshold(self) -> float:
+        """
+        Usage-rate threshold used for dead-code decisions.
+
+        Interprets `reset_threshold` as a multiplier of uniform usage.
+        Example: reset_threshold=0.5 => threshold = 0.5 / n_e.
+        """
+        return float(self.reset_threshold) * self._uniform_usage_rate()
     
     def forward(self, z: torch.Tensor):
         """
@@ -240,7 +254,8 @@ class VectorQuantizerEMA(nn.Module):
         """
         # Find dead codes (usage below threshold)
         usage_rate = self.cluster_size / (self.cluster_size.sum() + 1e-10)
-        dead_codes = usage_rate < self.reset_threshold
+        dead_threshold = self._dead_usage_threshold()
+        dead_codes = usage_rate < dead_threshold
         
         # Also consider codes that were never initialized
         dead_codes = dead_codes | ~self.initialized
@@ -267,10 +282,32 @@ class VectorQuantizerEMA(nn.Module):
     def get_codebook_usage_stats(self) -> dict:
         """Return statistics about codebook usage for monitoring."""
         usage_rate = self.cluster_size / (self.cluster_size.sum() + 1e-10)
+        uniform_rate = self._uniform_usage_rate()
+        dead_threshold = self._dead_usage_threshold()
+
+        # Shannon entropy of usage distribution, normalized to [0, 1]
+        entropy = -torch.sum(usage_rate * torch.log(usage_rate + 1e-10))
+        max_entropy = np.log(self.n_e)
+        entropy_normalized = float((entropy / max_entropy).item()) if max_entropy > 0 else 0.0
+
+        # Concentration stats (share captured by top-k codes)
+        sorted_usage, _ = torch.sort(usage_rate, descending=True)
+        top1_share = sorted_usage[:1].sum().item()
+        top5_share = sorted_usage[:5].sum().item()
+        top10_share = sorted_usage[:10].sum().item()
         
         return {
-            "active_codes": (usage_rate > self.reset_threshold).sum().item(),
-            "dead_codes": (usage_rate <= self.reset_threshold).sum().item(),
+            "uniform_rate": uniform_rate,
+            "dead_threshold": dead_threshold,
+            "active_codes": (usage_rate > dead_threshold).sum().item(),
+            "dead_codes": (usage_rate <= dead_threshold).sum().item(),
+            "active_codes_above_uniform": (usage_rate > uniform_rate).sum().item(),
+            "active_codes_above_half_uniform": (usage_rate > (0.5 * uniform_rate)).sum().item(),
+            "entropy": entropy.item(),
+            "entropy_normalized": entropy_normalized,
+            "top1_share": top1_share,
+            "top5_share": top5_share,
+            "top10_share": top10_share,
             "max_usage": usage_rate.max().item(),
             "min_usage": usage_rate.min().item(),
             "usage_std": usage_rate.std().item(),

@@ -56,6 +56,12 @@ def _run_train(
     resume: str | None = typer.Option(None, "--resume", help="Resume from checkpoint"),
     disk_mode: bool = typer.Option(False, "--disk-mode", help="Use LRU disk-mode dataset loading"),
     cache_size: int = typer.Option(5, "--cache-size", help="LRU cache size for disk mode"),
+    ema_decay: float = typer.Option(0.99, "--ema-decay", help="EMA decay rate"),
+    ema_reset_multiplier: float = typer.Option(0.5, "--ema-reset-multiplier", help="Dead-code threshold multiplier relative to uniform usage"),
+    ema_reset_interval: int = typer.Option(500, "--ema-reset-interval", help="EMA dead-code reset interval in updates"),
+    beta: float = typer.Option(0.25, "--beta", help="Commitment loss weight"),
+    no_ema: bool = typer.Option(False, "--no-ema", help="Disable EMA quantizer"),
+    metrics_stride: int = typer.Option(50, "--metrics-stride", help="Store metrics every N updates"),
 ) -> None:
     """Train the optimized VQ-VAE model."""
     argv: List[str] = []
@@ -72,6 +78,13 @@ def _run_train(
     if disk_mode:
         argv.append("--disk-mode")
     argv.extend(["--cache-size", str(cache_size)])
+    argv.extend(["--ema-decay", str(ema_decay)])
+    argv.extend(["--ema-reset-multiplier", str(ema_reset_multiplier)])
+    argv.extend(["--ema-reset-interval", str(ema_reset_interval)])
+    argv.extend(["--beta", str(beta)])
+    if no_ema:
+        argv.append("--no-ema")
+    argv.extend(["--metrics-stride", str(metrics_stride)])
 
     train_main(argv)
 
@@ -189,9 +202,30 @@ def model_train_command(
     resume: str | None = typer.Option(None, "--resume", help="Resume from checkpoint"),
     disk_mode: bool = typer.Option(False, "--disk-mode", help="Use LRU disk-mode dataset loading"),
     cache_size: int = typer.Option(5, "--cache-size", help="LRU cache size for disk mode"),
+    ema_decay: float = typer.Option(0.99, "--ema-decay", help="EMA decay rate"),
+    ema_reset_multiplier: float = typer.Option(0.5, "--ema-reset-multiplier", help="Dead-code threshold multiplier relative to uniform usage"),
+    ema_reset_interval: int = typer.Option(500, "--ema-reset-interval", help="EMA dead-code reset interval in updates"),
+    beta: float = typer.Option(0.25, "--beta", help="Commitment loss weight"),
+    no_ema: bool = typer.Option(False, "--no-ema", help="Disable EMA quantizer"),
+    metrics_stride: int = typer.Option(50, "--metrics-stride", help="Store metrics every N updates"),
 ) -> None:
     """Train the optimized VQ-VAE model."""
-    _run_train(data, world, epochs, one_pass, batch_size, resume, disk_mode, cache_size)
+    _run_train(
+        data,
+        world,
+        epochs,
+        one_pass,
+        batch_size,
+        resume,
+        disk_mode,
+        cache_size,
+        ema_decay,
+        ema_reset_multiplier,
+        ema_reset_interval,
+        beta,
+        no_ema,
+        metrics_stride,
+    )
 
 
 @model_app.command("infer")

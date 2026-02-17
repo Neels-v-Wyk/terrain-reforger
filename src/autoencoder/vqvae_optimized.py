@@ -187,8 +187,8 @@ class VQVAEOptimized(nn.Module):
         beta: float = 0.25,
         use_ema: bool = True,
         ema_decay: float = 0.99,
-        ema_reset_threshold: float = 0.01,
-        ema_reset_interval: int = 100,
+        ema_reset_threshold: float = 0.5,
+        ema_reset_interval: int = 500,
     ):
         super().__init__()
         

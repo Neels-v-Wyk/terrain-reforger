@@ -126,6 +126,7 @@ class CheckpointManager:
             'epoch': epoch,
             'timestamp': datetime.now().isoformat(),
             'metrics': metrics_json,
+            'n_updates': int(results.get('n_updates', 0)),
         }
         
         if config:
@@ -139,6 +140,7 @@ class CheckpointManager:
                 'avg_loss_last_100': float(np.mean(recent)),
                 'min_loss': float(np.min(results['loss_vals'])),
                 'final_perplexity': float(results['perplexities'][-1]) if 'perplexities' in results else None,
+                'n_updates': int(results.get('n_updates', 0)),
             }
         
         with open(path, 'w') as f:
