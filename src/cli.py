@@ -66,7 +66,7 @@ def data_analyze_command(
 @data_app.command("worldgen")
 def data_worldgen_command(
     num_worlds: int = typer.Option(20, "--num-worlds", help="Number of worlds to generate"),
-    parallel: Optional[int] = typer.Option(None, "--parallel", help="Parallel generation jobs (default: cpu_count, max 8)"),
+    parallel: Optional[int] = typer.Option(None, "--parallel", help="Parallel generation jobs (default: all available CPU cores)"),
 ) -> None:
     """Generate Terraria worlds through the internal worldgen script."""
     argv = ["--num-worlds", str(num_worlds)]

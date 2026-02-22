@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import os
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -298,14 +300,18 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     print(f"Found {len(world_files)} world files to analyze")
 
+    num_workers = min(os.cpu_count() or 1, len(world_files))
+    print(f"Analyzing with {num_workers} parallel worker(s)...")
+
     all_stats = []
-    for world_file in world_files:
-        try:
-            stats = analyze_world(world_file)
-            all_stats.append(stats)
-        except Exception as error:
-            print(f"Error analyzing {world_file}: {error}")
-            continue
+    with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+        futures = {executor.submit(analyze_world, wf): wf for wf in world_files}
+        for future in concurrent.futures.as_completed(futures):
+            wf = futures[future]
+            try:
+                all_stats.append(future.result())
+            except Exception as error:
+                print(f"Error analyzing {wf}: {error}")
 
     if not all_stats:
         print("No worlds were successfully analyzed!")

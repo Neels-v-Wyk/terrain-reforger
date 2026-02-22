@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import os
 import math
 import random
@@ -11,15 +12,40 @@ from typing import Optional, Sequence, List
 
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader, ConcatDataset, Subset
+from torch.utils.data import DataLoader, ConcatDataset, Dataset, Subset
 
 from src.autoencoder.dataset_cached import CachedTileDataset
-from src.autoencoder.dataset import TerrariaTileDataset, PreprocessedTileDataset
+from src.autoencoder.dataset import PreprocessedTileDataset
 from src.autoencoder.samplers import InterleavedFileSampler
 from src.autoencoder.vqvae import VQVAE, compute_loss
 from src.utils.checkpoint import CheckpointManager, save_final_model
 from src.utils.device import get_device
 from src.utils.visualization import compare_tiles, plot_training_results
+
+
+class _InMemoryTileDataset(Dataset):
+    """Thin wrapper around a pre-extracted list of chunk tensors."""
+    def __init__(self, chunks: List[torch.Tensor]):
+        self.chunks = chunks
+    def __len__(self) -> int:
+        return len(self.chunks)
+    def __getitem__(self, idx: int) -> torch.Tensor:
+        return self.chunks[idx]
+
+
+def _extract_tile_chunks(world_path: Path, region, chunk_size: int, overlap: int) -> List[torch.Tensor]:
+    """Top-level worker: construct TerrariaTileDataset and return only the chunk tensors."""
+    from src.autoencoder.dataset import TerrariaTileDataset  # local import keeps subprocess clean
+    ds = TerrariaTileDataset(
+        world_path=world_path,
+        region=region,
+        chunk_size=chunk_size,
+        overlap=overlap,
+        use_diversity_filter=True,
+        min_diversity=0.20,
+        deduplicate=True,
+    )
+    return ds.chunks
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -188,24 +214,22 @@ def run(args: argparse.Namespace) -> None:
         overlap = 16
 
         def create_dataset_from_worlds(world_files):
-            datasets = []
-            for w in world_files:
-                try:
-                    ds = TerrariaTileDataset(
-                        world_path=w,
-                        region=region,
-                        chunk_size=chunk_size,
-                        overlap=overlap,
-                        use_diversity_filter=True,
-                        min_diversity=0.20,
-                        deduplicate=True,
-                    )
-                    datasets.append(ds)
-                except Exception as e:
-                    print(f"Error loading world {w}: {e}")
-            if not datasets:
-                raise ValueError("Could not load any datasets from provided worlds")
-            return ConcatDataset(datasets)
+            num_workers = min(os.cpu_count() or 1, len(world_files))
+            all_chunks: List[torch.Tensor] = []
+            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {
+                    executor.submit(_extract_tile_chunks, w, region, chunk_size, overlap): w
+                    for w in world_files
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    w = futures[future]
+                    try:
+                        all_chunks.extend(future.result())
+                    except Exception as e:
+                        print(f"Error loading world {w}: {e}")
+            if not all_chunks:
+                raise ValueError("Could not load any chunks from provided worlds")
+            return _InMemoryTileDataset(all_chunks)
 
         print("Creating training dataset...")
         train_dataset = create_dataset_from_worlds(train_worlds)
