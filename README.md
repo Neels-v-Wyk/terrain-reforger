@@ -5,7 +5,9 @@ A Terraria terrain generation tool that trains a VQ-VAE on world chunk data and 
 ## Setup
 
 ```bash
-pip install -e .
+uv venv
+source .venv/bin/activate
+uv pip install -e .
 ```
 
 Requires a tModLoader/Terraria installation to generate worlds (see `src/scripts/worldgen.sh`).
@@ -38,13 +40,13 @@ terrain data prepare --mode chunked --output-dir data/cache
 ### 4. Train
 ```bash
 # From consolidated dataset
-terrain model train --data data/dataset_optimized.pt
+terrain model train --data data/dataset.pt
 
 # From chunked dataset (RAM-efficient)
 terrain model train --data data/cache --disk-mode
 
 # Resume from latest checkpoint
-terrain model train --data data/dataset_optimized.pt --resume checkpoints/latest_model.pt
+terrain model train --data data/dataset.pt --resume checkpoints/latest_model.pt
 ```
 
 ### 5. Infer / Export

@@ -62,7 +62,7 @@ def analyze_chunk(chunk_tensor: torch.Tensor) -> ChunkStats:
     """
     Analyze a chunk and calculate diversity statistics.
 
-    Expects the 8-channel optimized format (C, H, W) or (H, W, C) where C=8:
+    Expects the 8-channel format (C, H, W) or (H, W, C) where C=8:
         0: block_type index  1: block_shape  2: wall_type index
         3: liquid_type       4: wire_red     5: wire_blue
         6: wire_green        7: actuator
@@ -339,7 +339,7 @@ def deduplicate_chunks(chunks: List[torch.Tensor],
     """
     # Handle the case where stats_list is passed as the second positional argument but the caller 
     # intended it to be similarity_threshold (backward compatibility or cross-file confusion)
-    # However, in this case, the caller (dataset_optimized.py) passed stats_list as 2nd arg
+    # However, in this case, the caller (dataset.py) passed stats_list as 2nd arg
     # intentionally expecting it to be handled, while dataset.py passes similarity_threshold as kwarg.
     
     # If the second argument is a float (and not a list), treat it as similarity_threshold

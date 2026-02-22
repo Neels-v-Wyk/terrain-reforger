@@ -318,7 +318,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with open(output_file, "w") as handle:
         handle.write('"""Natural-world block and wall ID mappings.\n\n')
-        handle.write("Auto-generated from world analysis and used by the optimized 9-channel pipeline.\n")
+        handle.write("Auto-generated from world analysis and used by the 9-channel pipeline.\n")
         handle.write('"""\n\n')
         handle.write(f"NATURAL_BLOCK_IDS = {sorted(merged['block_types'])}\n\n")
         handle.write(f"NATURAL_WALL_IDS = {sorted(merged['wall_types'])}\n\n")

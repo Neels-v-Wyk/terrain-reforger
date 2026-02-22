@@ -1,5 +1,5 @@
 """
-Optimized VQ-VAE architecture for natural Terraria world generation.
+VQ-VAE architecture for natural Terraria world generation.
 
 Based on analysis of 463M tiles from 23 worlds, this version:
 - Uses only 218 naturally-occurring block types (vs 693 total)
@@ -27,7 +27,7 @@ from ..terraria.natural_ids import (
     WALL_INDEX_TO_ID
 )
 
-# Channel indices for the 8-channel optimized tensor
+# Channel indices for the 8-channel tensor
 CHANNEL_BLOCK_TYPE = 0
 CHANNEL_BLOCK_SHAPE = 1
 CHANNEL_WALL_TYPE = 2
@@ -56,7 +56,7 @@ DEFAULT_MODEL_CONFIG: dict = {
 }
 
 
-class OptimizedTileEncoder(nn.Module):
+class TileEncoder(nn.Module):
     """Encoder that embeds categorical features for natural tiles."""
     
     def __init__(self, embedding_dim: int = 32):
@@ -138,7 +138,7 @@ class OptimizedTileEncoder(nn.Module):
         return encoded
 
 
-class OptimizedTileDecoder(nn.Module):
+class TileDecoder(nn.Module):
     """Decoder that outputs both classification and continuous predictions."""
     
     def __init__(self, input_dim: int):
@@ -196,8 +196,8 @@ class OptimizedTileDecoder(nn.Module):
         return reconstructed, (block_logits, block_shape_logits, wall_logits, liquid_logits)
 
 
-class VQVAEOptimized(nn.Module):
-    """Optimized VQ-VAE for natural Terraria terrain generation."""
+class VQVAE(nn.Module):
+    """VQ-VAE for natural Terraria terrain generation."""
     
     def __init__(
         self,
@@ -218,7 +218,7 @@ class VQVAEOptimized(nn.Module):
         self.n_embeddings = n_embeddings
         
         # Tile-specific encoder/decoder
-        self.tile_encoder = OptimizedTileEncoder(embedding_dim)
+        self.tile_encoder = TileEncoder(embedding_dim)
         encoder_output_dim = self.tile_encoder.output_dim  # 3*32 + 6 = 102
         
         # Standard convolutional encoder
@@ -241,7 +241,7 @@ class VQVAEOptimized(nn.Module):
         self.conv_decoder = Decoder(h_dim, res_h_dim, 2, res_h_dim, out_dim=res_h_dim)
         
         # Tile-specific decoder
-        self.tile_decoder = OptimizedTileDecoder(res_h_dim)
+        self.tile_decoder = TileDecoder(res_h_dim)
     
     def forward(
         self, x: torch.Tensor
@@ -300,7 +300,7 @@ class VQVAEOptimized(nn.Module):
         return None
 
 
-def compute_optimized_loss(
+def compute_loss(
     x: torch.Tensor,
     x_hat: torch.Tensor,
     logits: Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
@@ -311,7 +311,7 @@ def compute_optimized_loss(
     binary_loss_weight: float = 1.0,
 ) -> Tuple[torch.Tensor, dict]:
     """
-    Compute loss for optimized model.
+    Compute loss for model.
     
     Args:
         x: Original input (B, 8, H, W)

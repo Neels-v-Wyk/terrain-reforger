@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import torch
 from tqdm import tqdm
 
-from src.terraria.chunk_processor_optimized import extract_optimized_chunk
+from src.terraria.chunk_processor import extract_chunk
 from src.terraria.sampling_strategies import DiversitySampler, analyze_chunk, deduplicate_chunks
 from src.terraria.world_handler import load_world
 
@@ -49,7 +49,7 @@ def process_world(world_path: Path, config: Dict[str, Any], skip_errors: bool = 
         for y in range(y_start, y_end, step):
             for x in range(x_start, x_end, step):
                 try:
-                    chunk_np = extract_optimized_chunk(world, x, y, config["chunk_size"], config["chunk_size"])
+                    chunk_np = extract_chunk(world, x, y, config["chunk_size"], config["chunk_size"])
                     tensor = torch.from_numpy(chunk_np).permute(2, 0, 1).float()
                     should_accept, _ = sampler.should_accept(tensor)
                     if should_accept:
@@ -170,7 +170,7 @@ def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, 
 # ---------------------------------------------------------------------------
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Prepare optimized Terraria dataset for training")
+    parser = argparse.ArgumentParser(description="Prepare Terraria dataset for training")
     parser.add_argument("--source", type=str, default="worldgen", help="Directory containing .wld files")
     parser.add_argument("--chunk-size", type=int, default=32, help="Chunk size in tiles")
     parser.add_argument("--overlap", type=int, default=8, help="Overlap between adjacent chunks")
@@ -181,7 +181,7 @@ def _build_parser() -> argparse.ArgumentParser:
         default="consolidated",
         help="consolidated: single .pt file; chunked: one .pt per world (for --disk-mode training)",
     )
-    parser.add_argument("--output", type=str, default="data/dataset_optimized.pt", help="Output path (consolidated mode)")
+    parser.add_argument("--output", type=str, default="data/dataset.pt", help="Output path (consolidated mode)")
     parser.add_argument("--output-dir", type=str, default="data/cache", help="Output directory (chunked mode)")
     parser.add_argument("--no-dedup", action="store_true", help="Disable deduplication (consolidated mode)")
     return parser

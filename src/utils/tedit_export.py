@@ -48,7 +48,7 @@ def tensor_to_tile(tensor_slice: np.ndarray) -> Tile:
     Returns:
         terraschem Tile object.
     """
-    # Channel indices (from vqvae_optimized.py)
+    # Channel indices (from vqvae.py)
     # 0: block_type, 1: block_shape (idx), 2: wall_type
     # 3: liquid_type (0=none)
     # 4: wire_red, 5: wire_blue, 6: wire_green, 7: actuator

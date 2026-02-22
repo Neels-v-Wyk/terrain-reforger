@@ -1,4 +1,4 @@
-"""Inference command for optimized VQ-VAE."""
+"""Inference command for VQ-VAE."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from typing import Optional, Sequence
 
 import torch
 
-from src.autoencoder.dataset_optimized import OptimizedTerrariaTileDataset
-from src.autoencoder.vqvae_optimized import VQVAEOptimized, compute_optimized_loss, DEFAULT_MODEL_CONFIG
+from src.autoencoder.dataset import TerrariaTileDataset
+from src.autoencoder.vqvae import VQVAE, compute_loss, DEFAULT_MODEL_CONFIG
 from src.utils.checkpoint import load_model_for_inference, read_checkpoint_config
 from src.utils.device import get_device
-from src.utils.visualization import compare_optimized_tiles
+from src.utils.visualization import compare_tiles
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run inference with optimized VQ-VAE")
+    parser = argparse.ArgumentParser(description="Run inference with VQ-VAE")
     parser.add_argument("model", nargs="?", help="Checkpoint/model path")
     parser.add_argument("--world", default=None, help="Path to .wld file (auto-detects from worldgen/ if omitted)")
     parser.add_argument(
@@ -49,10 +49,10 @@ def run(args: argparse.Namespace) -> None:
             elif best.exists():
                 model_path = str(best)
             else:
-                print("No optimized checkpoints found in checkpoints/")
+                print("No checkpoints found in checkpoints/")
                 return
         else:
-            print("checkpoints directory not found. Please train an optimized model first.")
+            print("checkpoints directory not found. Please train a model first.")
             return
 
     print(f"\n{'=' * 80}")
@@ -64,7 +64,7 @@ def run(args: argparse.Namespace) -> None:
         print("  [warn] No config found in checkpoint; using default architecture.")
     model_config = {**DEFAULT_MODEL_CONFIG, **ckpt_config}
 
-    model = VQVAEOptimized(**model_config)
+    model = VQVAE(**model_config)
     model = load_model_for_inference(model, model_path, str(device))
 
     print(f"{'=' * 80}\n")
@@ -80,7 +80,7 @@ def run(args: argparse.Namespace) -> None:
         world_path = str(worlds[0])
         print(f"Auto-detected world: {world_path}")
 
-    test_data = OptimizedTerrariaTileDataset(
+    test_data = TerrariaTileDataset(
         world_path=world_path,
         region=tuple(args.region),
         chunk_size=args.chunk_size,
@@ -103,7 +103,7 @@ def run(args: argparse.Namespace) -> None:
 
             sample = test_data[index].unsqueeze(0).to(device)
             embedding_loss, reconstructed, perplexity, logits = model(sample)
-            total_loss, loss_dict = compute_optimized_loss(sample, reconstructed, logits, embedding_loss)
+            total_loss, loss_dict = compute_loss(sample, reconstructed, logits, embedding_loss)
 
             print(f"Perplexity: {perplexity.item():.2f}")
             print(f"Total loss: {total_loss.item():.4f}")
@@ -119,7 +119,7 @@ def run(args: argparse.Namespace) -> None:
             for tile_idx in range(3):
                 original_tile = original_sample[:, mid_h, mid_w + tile_idx]
                 reconstructed_tile = reconstructed_sample[:, mid_h, mid_w + tile_idx]
-                print(compare_optimized_tiles(original_tile, reconstructed_tile, tile_idx + 1))
+                print(compare_tiles(original_tile, reconstructed_tile, tile_idx + 1))
             print()
 
     print(f"{'=' * 80}")

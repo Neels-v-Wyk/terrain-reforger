@@ -1,5 +1,5 @@
 """
-Optimized tile conversion for 8-channel natural world format.
+Tile conversion for 8-channel natural world format.
 
 Converts lihzahrd tiles to compact 8-channel representation:
 0. block_type (index 0-217)
@@ -24,7 +24,7 @@ LIQUID_TYPE_MAP = {
     'SHIMMER': 4
 }
 
-def tile_to_optimized_array(tile: lihzahrd.world.Tile) -> np.ndarray:
+def tile_to_array(tile: lihzahrd.world.Tile) -> np.ndarray:
     """
     Convert a lihzahrd tile to 8-element numpy array.
     
@@ -83,7 +83,7 @@ def tile_to_optimized_array(tile: lihzahrd.world.Tile) -> np.ndarray:
     return data
 
 
-def optimized_array_to_tile_dict(data: np.ndarray) -> dict:
+def array_to_tile_dict(data: np.ndarray) -> dict:
     """
     Convert 9-element array back to human-readable tile dictionary.
     

@@ -1,13 +1,13 @@
 """
-Optimized chunk processor for 8-channel format.
+Chunk processor for 8-channel format.
 """
 
 import numpy as np
 import lihzahrd
-from .converters_optimized import tile_to_optimized_array
+from .converters import tile_to_array
 
 
-def extract_optimized_chunk(
+def extract_chunk(
     world: lihzahrd.World,
     x_start: int,
     y_start: int,
@@ -15,7 +15,7 @@ def extract_optimized_chunk(
     height: int
 ) -> np.ndarray:
     """
-    Extract a chunk from the world in optimized 8-channel format.
+    Extract a chunk from the world in 8-channel format.
     
     Args:
         world: Loaded lihzahrd World object
@@ -40,6 +40,6 @@ def extract_optimized_chunk(
                 continue
             
             tile = world.tiles[world_x, world_y]
-            chunk[y, x, :] = tile_to_optimized_array(tile)
+            chunk[y, x, :] = tile_to_array(tile)
     
     return chunk

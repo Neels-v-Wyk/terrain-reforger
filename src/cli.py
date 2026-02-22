@@ -32,7 +32,7 @@ def data_prepare_command(
     chunk_size: int = typer.Option(32, "--chunk-size", help="Chunk size in tiles"),
     overlap: int = typer.Option(8, "--overlap", help="Overlap between adjacent chunks"),
     min_diversity: float = typer.Option(0.20, "--min-diversity", help="Minimum diversity score (0-1)"),
-    output: str = typer.Option("data/dataset_optimized.pt", "--output", help="Output path (consolidated mode)"),
+    output: str = typer.Option("data/dataset.pt", "--output", help="Output path (consolidated mode)"),
     output_dir: str = typer.Option("data/cache", "--output-dir", help="Output directory (chunked mode)"),
     no_dedup: bool = typer.Option(False, "--no-dedup", help="Disable deduplication (consolidated mode)"),
 ) -> None:
@@ -96,7 +96,7 @@ def model_train_command(
     no_ema: bool = typer.Option(False, "--no-ema", help="Disable EMA quantizer (use vanilla VQ-VAE)"),
     metrics_stride: int = typer.Option(50, "--metrics-stride", help="Store metrics every N updates"),
 ) -> None:
-    """Train the optimized VQ-VAE model."""
+    """Train the VQ-VAE model."""
     run_train(argparse.Namespace(
         data=data,
         world=world,

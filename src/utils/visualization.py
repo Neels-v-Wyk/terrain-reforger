@@ -82,9 +82,9 @@ def plot_training_results(results: Dict[str, List[float]], save_dir: str):
     plt.savefig(os.path.join(save_dir, 'component_losses.png'))
     plt.close()
 
-def decode_optimized_tile(tensor_slice: np.ndarray) -> Dict[str, Any]:
+def decode_tile(tensor_slice: np.ndarray) -> Dict[str, Any]:
     """
-    Convert a single optimized tile (8-channel) to human-readable format.
+    Convert a single tile (8-channel) to human-readable format.
     
     Args:
         tensor_slice: Array of shape (8,)
@@ -156,11 +156,11 @@ def decode_optimized_tile(tensor_slice: np.ndarray) -> Dict[str, Any]:
     
     return result
 
-def format_optimized_tile(tile_data: Dict[str, Any]) -> str:
-    """Format optimized tile data into string."""
+def format_tile(tile_data: Dict[str, Any]) -> str:
+    """Format tile data into string."""
     parts = []
     
-    # Handle the fact that decode_optimized_tile might return flattened or structured dict
+    # Handle the fact that decode_tile might return flattened or structured dict
     # If flattened (my first edit), convert to structured
     if "block_id" in tile_data:
         # Convert flat to structured
@@ -196,15 +196,15 @@ def format_optimized_tile(tile_data: Dict[str, Any]) -> str:
         
     return " | ".join(parts) if parts else "Empty Air"
 
-def compare_optimized_tiles(original: np.ndarray, reconstructed: np.ndarray, index: int) -> str:
+def compare_tiles(original: np.ndarray, reconstructed: np.ndarray, index: int) -> str:
     """
-    Compare original and reconstructed 9-channel tiles.
+    Compare original and reconstructed 8-channel tiles.
     """
-    orig_data = decode_optimized_tile(original)
-    recon_data = decode_optimized_tile(reconstructed)
+    orig_data = decode_tile(original)
+    recon_data = decode_tile(reconstructed)
     
-    orig_str = format_optimized_tile(orig_data)
-    recon_str = format_optimized_tile(recon_data)
+    orig_str = format_tile(orig_data)
+    recon_str = format_tile(recon_data)
     
     status = "✓" if orig_str == recon_str else "✗"
     

@@ -10,9 +10,9 @@ from typing import Optional, Sequence
 import numpy as np
 import torch
 
-from src.autoencoder.vqvae_optimized import VQVAEOptimized, DEFAULT_MODEL_CONFIG
+from src.autoencoder.vqvae import VQVAE, DEFAULT_MODEL_CONFIG
 from src.terraria.world_handler import load_world
-from src.terraria.chunk_processor_optimized import extract_optimized_chunk
+from src.terraria.chunk_processor import extract_chunk
 from src.utils.checkpoint import load_model_for_inference, read_checkpoint_config
 from src.utils.device import get_device
 from src.utils.tedit_export import (
@@ -138,7 +138,7 @@ def run(args: argparse.Namespace) -> int:
         print("  [warn] No config found in checkpoint; using default architecture.")
     model_config = {**DEFAULT_MODEL_CONFIG, **ckpt_config}
 
-    model = VQVAEOptimized(**model_config)
+    model = VQVAE(**model_config)
     model = load_model_for_inference(model, model_path, str(device))
 
     output_dir = Path(args.output_dir)
@@ -184,7 +184,7 @@ def run(args: argparse.Namespace) -> int:
                 continue
 
             # Extract chunk directly from world
-            chunk = extract_optimized_chunk(world, sample_x, y_start, width, height)
+            chunk = extract_chunk(world, sample_x, y_start, width, height)
             
             # Convert to tensor: (H, W, C) -> (C, H, W) -> (1, C, H, W)
             original = torch.from_numpy(chunk).permute(2, 0, 1).unsqueeze(0).float().to(device)

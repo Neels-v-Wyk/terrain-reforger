@@ -1,4 +1,4 @@
-"""Training command for optimized VQ-VAE."""
+"""Training command for VQ-VAE."""
 
 from __future__ import annotations
 
@@ -14,12 +14,12 @@ from torch.optim import Adam
 from torch.utils.data import DataLoader, ConcatDataset, Subset
 
 from src.autoencoder.dataset_cached import CachedTileDataset
-from src.autoencoder.dataset_optimized import OptimizedTerrariaTileDataset, PreprocessedTileDataset
+from src.autoencoder.dataset import TerrariaTileDataset, PreprocessedTileDataset
 from src.autoencoder.samplers import InterleavedFileSampler
-from src.autoencoder.vqvae_optimized import VQVAEOptimized, compute_optimized_loss
+from src.autoencoder.vqvae import VQVAE, compute_loss
 from src.utils.checkpoint import CheckpointManager, save_final_model
 from src.utils.device import get_device
-from src.utils.visualization import compare_optimized_tiles, plot_training_results
+from src.utils.visualization import compare_tiles, plot_training_results
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -191,7 +191,7 @@ def run(args: argparse.Namespace) -> None:
             datasets = []
             for w in world_files:
                 try:
-                    ds = OptimizedTerrariaTileDataset(
+                    ds = TerrariaTileDataset(
                         world_path=w,
                         region=region,
                         chunk_size=chunk_size,
@@ -245,7 +245,7 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Batches per epoch: {len(train_loader)}")
     print(f"  Total training samples: {len(train_dataset)}")
     print(f"  Total validation samples: {len(val_dataset)}")
-    print("  Model: Optimized VQ-VAE (8 channels)")
+    print("  Model: VQ-VAE (8 channels)")
     print(f"  Embedding dim: {model_config['embedding_dim']}")
     print(f"  Codebook size: {model_config['n_embeddings']}")
     print(f"  Quantizer: {'EMA' if model_config['use_ema'] else 'Vanilla'} (beta={model_config['beta']})")
@@ -263,7 +263,7 @@ def run(args: argparse.Namespace) -> None:
         print(f"  Dead code reset interval: every {model_config['ema_reset_interval']} updates")
     print(f"  Metrics stride: every {args.metrics_stride} updates")
 
-    model = VQVAEOptimized(**model_config).to(device)
+    model = VQVAE(**model_config).to(device)
     optimizer = Adam(model.parameters(), lr=learning_rate)
     checkpoint_manager = CheckpointManager(checkpoint_dir="checkpoints")
 
@@ -328,7 +328,7 @@ def run(args: argparse.Namespace) -> None:
             embedding_loss, x_hat, perplexity, logits = model(batch)
             last_reconstruction = x_hat
 
-            total_loss, loss_dict = compute_optimized_loss(
+            total_loss, loss_dict = compute_loss(
                 batch,
                 x_hat,
                 logits,
@@ -430,7 +430,7 @@ def run(args: argparse.Namespace) -> None:
                 val_batch = val_batch.to(device)
                 emb_loss_val, x_hat_val, perp_val, logits_val = model(val_batch)
                 
-                loss_val, loss_dict_val = compute_optimized_loss(
+                loss_val, loss_dict_val = compute_loss(
                     val_batch, 
                     x_hat_val, 
                     logits_val, 
@@ -458,7 +458,7 @@ def run(args: argparse.Namespace) -> None:
                 orig_tile = orig_sample[:, mid_h, mid_w + index]
                 recon_tile = recon_sample[:, mid_h, mid_w + index]
                 print("-" * 40)
-                print(compare_optimized_tiles(orig_tile, recon_tile, index + 1))
+                print(compare_tiles(orig_tile, recon_tile, index + 1))
             print("-" * 40 + "\n")
 
     print("\nTraining complete! Saving final model...")

@@ -1,5 +1,5 @@
 """
-Optimized dataset for 8-channel natural world format.
+Dataset for 8-channel natural world format.
 """
 
 import torch
@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Union, Optional, List, Tuple
 import lihzahrd
 
-from ..terraria.chunk_processor_optimized import extract_optimized_chunk
+from ..terraria.chunk_processor import extract_chunk
 from ..terraria.world_handler import load_world
 from ..terraria.sampling_strategies import (
     DiversitySampler,
@@ -43,9 +43,9 @@ class PreprocessedTileDataset(Dataset):
         return self.chunks[idx]
 
 
-class OptimizedTerrariaTileDataset(Dataset):
+class TerrariaTileDataset(Dataset):
     """
-    PyTorch Dataset for Terraria tiles in optimized 8-channel format.
+    PyTorch Dataset for Terraria tiles in 8-channel format.
     """
     
     def __init__(
@@ -82,10 +82,10 @@ class OptimizedTerrariaTileDataset(Dataset):
         # Generate chunks
         self.chunks, self.chunk_stats = self._generate_chunks()
         
-        print(f"\nOptimized dataset created:")
+        print(f"\nDataset created:")
         print(f"  Total chunks: {len(self.chunks)}")
         print(f"  Chunk size: {self.chunk_size}x{self.chunk_size}")
-        print(f"  Channels: 8 (optimized)")
+        print(f"  Channels: 8")
         self._print_statistics()
     
     def _generate_chunks(self) -> Tuple[List[torch.Tensor], List[ChunkStats]]:
@@ -109,7 +109,7 @@ class OptimizedTerrariaTileDataset(Dataset):
         
         for y in range(y_start, y_end, step):
             for x in range(x_start, x_end, step):
-                chunk = extract_optimized_chunk(self.world, x, y, self.chunk_size, self.chunk_size)
+                chunk = extract_chunk(self.world, x, y, self.chunk_size, self.chunk_size)
                 # Convert from (H, W, C) to (C, H, W) for PyTorch
                 tensor = torch.from_numpy(chunk).permute(2, 0, 1).float()
                 
