@@ -36,7 +36,7 @@ class InterleavedFileSampler(Sampler[int]):
         self._build_index_map()
 
     def _build_index_map(self):
-        # Scan the global_inidex to bucket indices by file
+        # Scan the global_index to bucket indices by file
         for global_idx, (file_idx, _) in enumerate(self.dataset.global_index):
             if file_idx not in self.file_to_indices:
                 self.file_to_indices[file_idx] = []

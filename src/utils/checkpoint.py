@@ -308,8 +308,28 @@ def save_final_model(
     print(f"Weights only:  {weights_path}")
     print(f"Metadata:      {metadata_path}")
     print(f"{'='*80}\n")
-    
+
     return model_path
+
+
+def read_checkpoint_config(model_path: str | Path, device: str = "cpu") -> dict:
+    """
+    Read only the config dict stored inside a checkpoint without loading model weights.
+
+    Useful for instantiating the correct model architecture before calling
+    load_model_for_inference.
+
+    Args:
+        model_path: Path to checkpoint file
+        device: Torch map_location passed to torch.load
+
+    Returns:
+        Config dict from the checkpoint, or {} if none was saved.
+    """
+    checkpoint = torch.load(Path(model_path), map_location=device, weights_only=True)
+    if isinstance(checkpoint, dict):
+        return checkpoint.get("config", {})
+    return {}
 
 
 def load_model_for_inference(
@@ -319,7 +339,7 @@ def load_model_for_inference(
 ) -> torch.nn.Module:
     """
     Load a trained model for inference.
-    
+
     Args:
         model: Model instance (with correct architecture)
         model_path: Path to saved model file

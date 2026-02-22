@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 
 
 class ResidualLayer(nn.Module):
@@ -41,7 +40,7 @@ class ResidualStack(nn.Module):
         super(ResidualStack, self).__init__()
         self.n_res_layers = n_res_layers
         self.stack = nn.ModuleList(
-            [ResidualLayer(in_dim, h_dim, res_h_dim)]*n_res_layers)
+            [ResidualLayer(in_dim, h_dim, res_h_dim) for _ in range(n_res_layers)])
 
     def forward(self, x):
         for layer in self.stack:
@@ -50,15 +49,3 @@ class ResidualStack(nn.Module):
         return x
 
 
-if __name__ == "__main__":
-    # random data
-    x = np.random.random_sample((3, 40, 40, 200))
-    x = torch.tensor(x).float()
-    # test Residual Layer
-    res = ResidualLayer(40, 40, 20)
-    res_out = res(x)
-    print('Res Layer out shape:', res_out.shape)
-    # test res stack
-    res_stack = ResidualStack(40, 40, 20, 3)
-    res_stack_out = res_stack(x)
-    print('Res Stack out shape:', res_stack_out.shape)

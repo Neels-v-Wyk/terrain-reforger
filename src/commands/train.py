@@ -16,6 +16,7 @@ from src.autoencoder.dataset_optimized import OptimizedTerrariaTileDataset, Prep
 from src.autoencoder.samplers import InterleavedFileSampler
 from src.autoencoder.vqvae_optimized import VQVAEOptimized, compute_optimized_loss
 from src.utils.checkpoint import CheckpointManager, save_final_model
+from src.utils.device import get_device
 from src.utils.visualization import compare_optimized_tiles, plot_training_results
 
 
@@ -71,14 +72,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() 
-        else "mps" if torch.backends.mps.is_available() 
-        else "cpu"
-    )
+def run(args: argparse.Namespace) -> None:
+    """Execute training from a pre-populated Namespace. Called by main() and the CLI."""
+    device = get_device()
     print(f"Using device: {device}")
 
     model_config = {
@@ -118,7 +114,16 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
             chunk_size = training_data.config["chunk_size"]
             print(f"  Chunk size: {chunk_size}")
     else:
-        world_file = args.world if args.world else "worldgen/World_20260211_213447_mBvegqrN.wld"
+        if args.world:
+            world_file = args.world
+        else:
+            worldgen_dir = Path("worldgen")
+            worlds = sorted(worldgen_dir.glob("*.wld")) if worldgen_dir.exists() else []
+            if not worlds:
+                print("No .wld files found. Specify --world or run 'terrain data worldgen' first.")
+                return
+            world_file = str(worlds[0])
+            print(f"Auto-detected world: {world_file}")
         region = (0, 0, 8360, 2360)
         chunk_size = 32
         overlap = 16
@@ -358,6 +363,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print("  from src.utils.checkpoint import CheckpointManager")
     print("  manager = CheckpointManager('checkpoints')")
     print(f"  model, _, _, _ = manager.load_checkpoint(model, '{final_path}')")
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    run(_build_parser().parse_args(argv))
 
 
 if __name__ == "__main__":

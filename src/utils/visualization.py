@@ -2,8 +2,34 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 from typing import Dict, Any, List
+
+import lihzahrd.enums as enums
+
 from src.terraria.natural_ids import BLOCK_INDEX_TO_ID, WALL_INDEX_TO_ID
-from src.terraria.tensor_utils import BLOCK_NAMES, WALL_NAMES, LIQUID_TYPES, BLOCK_SHAPES
+
+
+def _fmt(name: str) -> str:
+    """Convert UPPER_SNAKE_CASE enum name to Title Case."""
+    return name.replace("_", " ").title()
+
+
+# Human-readable name lookups (keyed by game ID, not our compressed index)
+BLOCK_NAMES: Dict[int, str] = {int(bt.value): _fmt(bt.name) for bt in enums.BlockType}
+BLOCK_NAMES[0] = "Air"
+
+WALL_NAMES: Dict[int, str] = {int(wt.value): _fmt(wt.name.replace("_UNSAFE", "")) for wt in enums.WallType}
+WALL_NAMES[0] = "No Wall"
+
+LIQUID_NAMES: Dict[int, str] = {int(lt.value): _fmt(lt.name.replace("NO_LIQUID", "None")) for lt in enums.LiquidType}
+
+BLOCK_SHAPES: Dict[int, str] = {
+    0: "Full",
+    1: "Half",
+    2: "Top-Right Slope",
+    3: "Top-Left Slope",
+    4: "Bottom-Right Slope",
+    5: "Bottom-Left Slope",
+}
 
 def plot_training_results(results: Dict[str, List[float]], save_dir: str):
     """
@@ -107,7 +133,7 @@ def decode_optimized_tile(tensor_slice: np.ndarray) -> Dict[str, Any]:
         'liquid': {
             'present': liquid_present,
             'type_idx': liquid_type,
-            'name': LIQUID_TYPES.get(liquid_type, "None") if liquid_present else "None"
+            'name': LIQUID_NAMES.get(liquid_type, "None") if liquid_present else "None"
         },
         'wiring': {
             'red': wire_red,

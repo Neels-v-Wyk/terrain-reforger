@@ -61,40 +61,44 @@ def calculate_entropy(values: np.ndarray) -> float:
 def analyze_chunk(chunk_tensor: torch.Tensor) -> ChunkStats:
     """
     Analyze a chunk and calculate diversity statistics.
-    
+
+    Expects the 9-channel optimized format (C, H, W) or (H, W, C) where C=9:
+        0: block_type index  1: block_shape  2: wall_type index
+        3: liquid_present    4: liquid_type  5: wire_red
+        6: wire_blue         7: wire_green   8: actuator
+
     Args:
-        chunk_tensor: Tensor of shape (17, H, W) or (H, W, 17)
-        
+        chunk_tensor: Tensor of shape (9, H, W) or (H, W, 9)
+
     Returns:
         ChunkStats with diversity metrics
     """
-    # Convert to numpy and handle both formats
+    # Convert to numpy
     if isinstance(chunk_tensor, torch.Tensor):
         chunk = chunk_tensor.cpu().numpy()
     else:
         chunk = chunk_tensor
-    
+
     # Ensure (H, W, C) format
-    if chunk.shape[0] == 17:
+    if chunk.shape[0] == 9:
         chunk = np.transpose(chunk, (1, 2, 0))
-    
-    h, w, c = chunk.shape
-    
-    # Extract channels
+
+    # Extract channels (9-channel format)
     block_types = chunk[:, :, 0].astype(int)
-    block_active = chunk[:, :, 1]
-    wall_types = chunk[:, :, 6].astype(int)
-    liquid_amount = chunk[:, :, 11]
-    wiring = chunk[:, :, 12:17]
-    
+    # Block is active when its index is non-zero (0 = Air in natural_ids)
+    block_active = (block_types > 0).astype(np.float32)
+    wall_types = chunk[:, :, 2].astype(int)
+    liquid_present = chunk[:, :, 3]
+    wiring = chunk[:, :, 5:9]
+
     # Calculate statistics
     unique_blocks = len(np.unique(block_types[block_active > 0.5]))
     unique_walls = len(np.unique(wall_types[wall_types > 0]))
     
     block_entropy = calculate_entropy(block_types[block_active > 0.5]) if unique_blocks > 1 else 0.0
     wall_entropy = calculate_entropy(wall_types[wall_types > 0]) if unique_walls > 1 else 0.0
-    
-    has_liquid = bool(np.any(liquid_amount > 0))
+
+    has_liquid = bool(np.any(liquid_present > 0.5))
     has_wiring = bool(np.any(wiring > 0.5))
     
     block_coverage = float(np.mean(block_active > 0.5))

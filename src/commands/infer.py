@@ -9,15 +9,16 @@ from typing import Optional, Sequence
 import torch
 
 from src.autoencoder.dataset_optimized import OptimizedTerrariaTileDataset
-from src.autoencoder.vqvae_optimized import VQVAEOptimized, compute_optimized_loss
-from src.utils.checkpoint import load_model_for_inference
+from src.autoencoder.vqvae_optimized import VQVAEOptimized, compute_optimized_loss, DEFAULT_MODEL_CONFIG
+from src.utils.checkpoint import load_model_for_inference, read_checkpoint_config
+from src.utils.device import get_device
 from src.utils.visualization import compare_optimized_tiles
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run inference with optimized VQ-VAE")
     parser.add_argument("model", nargs="?", help="Checkpoint/model path")
-    parser.add_argument("--world", default="worldgen/World_20260211_213447_mBvegqrN.wld", help="Path to .wld file")
+    parser.add_argument("--world", default=None, help="Path to .wld file (auto-detects from worldgen/ if omitted)")
     parser.add_argument(
         "--region",
         nargs=4,
@@ -31,14 +32,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[Sequence[str]] = None) -> None:
-    args = _build_parser().parse_args(argv)
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available() 
-        else "mps" if torch.backends.mps.is_available() 
-        else "cpu"
-    )
+def run(args: argparse.Namespace) -> None:
+    """Execute inference from a pre-populated Namespace. Called by main() and the CLI."""
+    device = get_device()
     print(f"Using device: {device}")
 
     if args.model:
@@ -63,13 +59,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print("LOADING MODEL FOR INFERENCE")
     print(f"{'=' * 80}")
 
-    model_config = {
-        "embedding_dim": 32,
-        "h_dim": 128,
-        "res_h_dim": 64,
-        "n_embeddings": 512,
-        "beta": 0.25,
-    }
+    ckpt_config = read_checkpoint_config(model_path, str(device))
+    if not ckpt_config:
+        print("  [warn] No config found in checkpoint; using default architecture.")
+    model_config = {**DEFAULT_MODEL_CONFIG, **ckpt_config}
 
     model = VQVAEOptimized(**model_config)
     model = load_model_for_inference(model, model_path, str(device))
@@ -77,8 +70,18 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(f"{'=' * 80}\n")
 
     print("Loading test data...")
+    world_path = args.world
+    if not world_path:
+        worldgen_dir = Path("worldgen")
+        worlds = sorted(worldgen_dir.glob("*.wld")) if worldgen_dir.exists() else []
+        if not worlds:
+            print("No .wld files found. Specify --world or run 'terrain data worldgen' first.")
+            return
+        world_path = str(worlds[0])
+        print(f"Auto-detected world: {world_path}")
+
     test_data = OptimizedTerrariaTileDataset(
-        world_path=args.world,
+        world_path=world_path,
         region=tuple(args.region),
         chunk_size=args.chunk_size,
         overlap=0,
@@ -127,6 +130,10 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     print(f"✓ Model path: {model_path}")
     print(f"✓ Device: {device}")
     print(f"✓ Codebook size: {model_config['n_embeddings']}")
+
+
+def main(argv: Optional[Sequence[str]] = None) -> None:
+    run(_build_parser().parse_args(argv))
 
 
 if __name__ == "__main__":

@@ -10,9 +10,11 @@ from typing import Optional, Sequence
 import numpy as np
 import torch
 
-from src.autoencoder.vqvae_optimized import VQVAEOptimized
+from src.autoencoder.vqvae_optimized import VQVAEOptimized, DEFAULT_MODEL_CONFIG
 from src.terraria.world_handler import load_world
 from src.terraria.chunk_processor_optimized import extract_optimized_chunk
+from src.utils.checkpoint import load_model_for_inference, read_checkpoint_config
+from src.utils.device import get_device
 from src.utils.tedit_export import (
     export_tensor_to_schematic,
     export_inference_result,
@@ -88,38 +90,9 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def load_model(model: VQVAEOptimized, model_path: str, device: str) -> VQVAEOptimized:
-    """Load model weights from checkpoint."""
-    print(f"Loading model from: {model_path}")
-    checkpoint = torch.load(model_path, map_location=device, weights_only=True)
-    
-    # Handle different checkpoint formats
-    if isinstance(checkpoint, dict):
-        if "model_state_dict" in checkpoint:
-            state_dict = checkpoint["model_state_dict"]
-        elif "state_dict" in checkpoint:
-            state_dict = checkpoint["state_dict"]
-        else:
-            state_dict = checkpoint
-    else:
-        state_dict = checkpoint
-    
-    model.load_state_dict(state_dict)
-    print("✓ Model loaded successfully")
-    
-    model.to(device)
-    model.eval()
-    return model
-
-
-def main(argv: Optional[Sequence[str]] = None) -> int:
-    args = _build_parser().parse_args(argv)
-
-    device = torch.device(
-        "cuda" if torch.cuda.is_available()
-        else "mps" if torch.backends.mps.is_available()
-        else "cpu"
-    )
+def run(args: argparse.Namespace) -> int:
+    """Execute export from a pre-populated Namespace. Called by main() and the CLI."""
+    device = get_device()
     print(f"Using device: {device}")
 
     # Find model checkpoint
@@ -158,18 +131,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Size: {width}x{height} tiles")
     print(f"Output: {args.output_dir}/")
 
-    # Load model - use_ema=False to match older checkpoints that used VectorQuantizer
-    model_config = {
-        "embedding_dim": 32,
-        "h_dim": 128,
-        "res_h_dim": 64,
-        "n_embeddings": 512,
-        "beta": 0.25,
-        "use_ema": False,  # Match checkpoint format
-    }
+    # Load model — read architecture config from the checkpoint so the right
+    # number of embeddings / dimensions are used even if they differ from the default.
+    ckpt_config = read_checkpoint_config(model_path, str(device))
+    if not ckpt_config:
+        print("  [warn] No config found in checkpoint; using default architecture.")
+    model_config = {**DEFAULT_MODEL_CONFIG, **ckpt_config}
 
     model = VQVAEOptimized(**model_config)
-    model = load_model(model, model_path, str(device))
+    model = load_model_for_inference(model, model_path, str(device))
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -310,6 +280,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"  File → Import Schematic → Select .TEditSch file")
 
     return 0
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    return run(_build_parser().parse_args(argv))
 
 
 if __name__ == "__main__":

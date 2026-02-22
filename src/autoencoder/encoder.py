@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
 from .residual import ResidualStack
 
 
@@ -42,12 +41,3 @@ class Encoder(nn.Module):
         return self.conv_stack(x)
 
 
-if __name__ == "__main__":
-    # random data
-    x = np.random.random_sample((3, 40, 40, 200))
-    x = torch.tensor(x).float()
-
-    # test encoder
-    encoder = Encoder(40, 128, 3, 64)
-    encoder_out = encoder(x)
-    print('Encoder out shape:', encoder_out.shape)

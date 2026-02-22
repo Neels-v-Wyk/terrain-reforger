@@ -43,6 +43,19 @@ NUM_NATURAL_WALLS = len(NATURAL_WALL_IDS)    # 77
 NUM_LIQUID_TYPES = 5  # 0=none, 1=water, 2=lava, 3=honey, 4=shimmer
 NUM_BLOCK_SHAPES = 6  # 0=full, 1=half, 2..5 sloped variants
 
+# Default architecture config — single source of truth used by train/infer/export.
+DEFAULT_MODEL_CONFIG: dict = {
+    "embedding_dim": 32,
+    "h_dim": 128,
+    "res_h_dim": 64,
+    "n_embeddings": 512,
+    "beta": 0.25,
+    "use_ema": True,
+    "ema_decay": 0.99,
+    "ema_reset_threshold": 0.5,
+    "ema_reset_interval": 500,
+}
+
 
 class OptimizedTileEncoder(nn.Module):
     """Encoder that embeds categorical features for natural tiles."""
