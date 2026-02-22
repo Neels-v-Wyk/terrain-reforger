@@ -3,15 +3,28 @@
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 from pathlib import Path
 from typing import Optional, Sequence
+
+_MAX_PARALLEL = os.cpu_count() or 1
+
+
+def _default_parallel() -> int:
+    """Return the number of available CPU cores."""
+    return _MAX_PARALLEL
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Generate Terraria worlds via tModLoader automation")
     parser.add_argument("--num-worlds", type=int, default=20, help="Number of worlds to generate")
-    parser.add_argument("--parallel", type=int, default=1, help="Number of parallel generation jobs (default: 1 = sequential)")
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=None,
+        help=f"Parallel generation jobs (default: all {_MAX_PARALLEL} CPU cores)",
+    )
     return parser
 
 
@@ -22,7 +35,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("--num-worlds must be >= 1")
         return 1
 
-    if args.parallel < 1:
+    parallel = args.parallel if args.parallel is not None else _default_parallel()
+    if parallel < 1:
         print("--parallel must be >= 1")
         return 1
 
@@ -33,7 +47,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"Worldgen script not found: {script_path}")
         return 1
 
-    result = subprocess.run([str(script_path), str(args.num_worlds), str(args.parallel)], cwd=str(repo_root), check=False)
+    print(f"Generating {args.num_worlds} world(s) with {parallel} parallel job(s)...")
+    result = subprocess.run([str(script_path), str(args.num_worlds), str(parallel)], cwd=str(repo_root), check=False)
     return result.returncode
 
 

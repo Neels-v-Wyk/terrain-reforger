@@ -7,6 +7,7 @@ and pipelines/prepare_dataset_cli.py into a single, focused command.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -28,7 +29,7 @@ def find_world_files(source_dir: Path) -> List[Path]:
     return sorted(source_dir.glob("*.wld"))
 
 
-def process_world(world_path: Path, config: Dict[str, Any], skip_errors: bool = True) -> List[torch.Tensor]:
+def process_world(world_path: Path, config: Dict[str, Any], skip_errors: bool = True, verbose: bool = True) -> List[torch.Tensor]:
     """Extract diversity-filtered chunks from a single world file."""
     world = load_world(world_path)
 
@@ -45,7 +46,7 @@ def process_world(world_path: Path, config: Dict[str, Any], skip_errors: bool = 
     chunks: List[torch.Tensor] = []
     total_possible = ((y_end - y_start) // step) * ((x_end - x_start) // step)
 
-    with tqdm(total=total_possible, desc=f"Scanning {world_path.name}", unit="chunk") as pbar:
+    with tqdm(total=total_possible, desc=f"Scanning {world_path.name}", unit="chunk", disable=not verbose) as pbar:
         for y in range(y_start, y_end, step):
             for x in range(x_start, x_end, step):
                 try:
@@ -108,40 +109,89 @@ def _save_consolidated_dataset(
 # Modes
 # ---------------------------------------------------------------------------
 
-def _run_chunked(world_files: List[Path], config: dict, output_dir: Path) -> None:
+def _run_chunked(world_files: List[Path], config: dict, output_dir: Path, num_workers: int = 1) -> None:
     os.makedirs(output_dir, exist_ok=True)
-    for world_path in world_files:
-        output_path = output_dir / f"{world_path.stem}.pt"
-        if output_path.exists():
-            print(f"Skipping {world_path.name} (already exists)")
-            continue
-        print(f"Loading {world_path.name}...")
-        try:
-            chunks = process_world(world_path, config, skip_errors=True)
-        except Exception as error:
-            print(f"Error loading {world_path}: {error}")
-            continue
-        if chunks:
-            print(f"  Saving {len(chunks)} chunks to {output_path.name}...")
-            _save_chunk_file(output_path, chunks, config, str(world_path.name))
-        else:
-            print(f"  No interesting chunks found in {world_path.name}")
+
+    pending = [wf for wf in world_files if not (output_dir / f"{wf.stem}.pt").exists()]
+    skipped = len(world_files) - len(pending)
+    if skipped:
+        print(f"Skipping {skipped} already-processed world(s).")
+    if not pending:
+        print(f"All worlds already processed. Done.")
+        return
+
+    if num_workers > 1:
+        print(f"Processing {len(pending)} world(s) with {num_workers} workers...")
+        with tqdm(total=len(pending), desc="Worlds", unit="world") as outer_pbar:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {
+                    executor.submit(process_world, wp, config, True, False): wp
+                    for wp in pending
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    world_path = futures[future]
+                    output_path = output_dir / f"{world_path.stem}.pt"
+                    try:
+                        chunks = future.result()
+                        if chunks:
+                            _save_chunk_file(output_path, chunks, config, str(world_path.name))
+                            outer_pbar.set_postfix(world=world_path.name, chunks=len(chunks))
+                        else:
+                            outer_pbar.set_postfix(world=world_path.name, chunks=0)
+                    except Exception as error:
+                        tqdm.write(f"Error processing {world_path.name}: {error}")
+                    finally:
+                        outer_pbar.update(1)
+    else:
+        for world_path in pending:
+            output_path = output_dir / f"{world_path.stem}.pt"
+            print(f"Loading {world_path.name}...")
+            try:
+                chunks = process_world(world_path, config, skip_errors=True)
+            except Exception as error:
+                print(f"Error loading {world_path}: {error}")
+                continue
+            if chunks:
+                print(f"  Saving {len(chunks)} chunks to {output_path.name}...")
+                _save_chunk_file(output_path, chunks, config, str(world_path.name))
+            else:
+                print(f"  No interesting chunks found in {world_path.name}")
 
     print(f"\nDone. Use CachedTileDataset pointing to: {output_dir}")
 
 
-def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, no_dedup: bool) -> None:
+def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, no_dedup: bool, num_workers: int = 1) -> None:
     os.makedirs(output_path.parent, exist_ok=True)
     all_chunks: List[torch.Tensor] = []
-    for world_path in world_files:
-        print(f"Loading {world_path.name}...")
-        try:
-            chunks = process_world(world_path, config)
-        except Exception as error:
-            print(f"Error loading {world_path}: {error}")
-            continue
-        print(f"  Accepted {len(chunks)} chunks from {world_path.name}")
-        all_chunks.extend(chunks)
+
+    if num_workers > 1:
+        print(f"Processing {len(world_files)} world(s) with {num_workers} workers...")
+        with tqdm(total=len(world_files), desc="Worlds", unit="world") as outer_pbar:
+            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {
+                    executor.submit(process_world, wp, config, True, False): wp
+                    for wp in world_files
+                }
+                for future in concurrent.futures.as_completed(futures):
+                    world_path = futures[future]
+                    try:
+                        chunks = future.result()
+                        all_chunks.extend(chunks)
+                        outer_pbar.set_postfix(world=world_path.name, chunks=len(chunks))
+                    except Exception as error:
+                        tqdm.write(f"Error processing {world_path.name}: {error}")
+                    finally:
+                        outer_pbar.update(1)
+    else:
+        for world_path in world_files:
+            print(f"Loading {world_path.name}...")
+            try:
+                chunks = process_world(world_path, config)
+            except Exception as error:
+                print(f"Error loading {world_path}: {error}")
+                continue
+            print(f"  Accepted {len(chunks)} chunks from {world_path.name}")
+            all_chunks.extend(chunks)
 
     print(f"\nTotal chunks extracted: {len(all_chunks)}")
 
@@ -184,11 +234,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=str, default="data/dataset.pt", help="Output path (consolidated mode)")
     parser.add_argument("--output-dir", type=str, default="data/cache", help="Output directory (chunked mode)")
     parser.add_argument("--no-dedup", action="store_true", help="Disable deduplication (consolidated mode)")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of parallel worker processes (default: number of CPU cores)",
+    )
     return parser
 
 
 def run_preparation(args: argparse.Namespace) -> None:
     """Entry point callable from the Typer CLI (receives a parsed Namespace)."""
+    import os as _os
     config = {
         "chunk_size": args.chunk_size,
         "overlap": args.overlap,
@@ -201,10 +258,13 @@ def run_preparation(args: argparse.Namespace) -> None:
         return
     print(f"Found {len(world_files)} worlds.")
 
+    num_workers = getattr(args, "workers", None) or _os.cpu_count() or 1
+    print(f"Using {num_workers} worker process(es).")
+
     if args.mode == "chunked":
-        _run_chunked(world_files, config, Path(args.output_dir))
+        _run_chunked(world_files, config, Path(args.output_dir), num_workers=num_workers)
     else:
-        _run_consolidated(world_files, config, Path(args.output), args.no_dedup)
+        _run_consolidated(world_files, config, Path(args.output), args.no_dedup, num_workers=num_workers)
 
 
 def main(argv: Optional[Sequence[str]] = None) -> None:

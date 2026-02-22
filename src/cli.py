@@ -35,6 +35,7 @@ def data_prepare_command(
     output: str = typer.Option("data/dataset.pt", "--output", help="Output path (consolidated mode)"),
     output_dir: str = typer.Option("data/cache", "--output-dir", help="Output directory (chunked mode)"),
     no_dedup: bool = typer.Option(False, "--no-dedup", help="Disable deduplication (consolidated mode)"),
+    workers: Optional[int] = typer.Option(None, "--workers", help="Parallel worker processes (default: number of CPU cores)"),
 ) -> None:
     """Prepare training datasets from generated Terraria worlds."""
     if mode not in {"consolidated", "chunked"}:
@@ -48,6 +49,7 @@ def data_prepare_command(
         output=output,
         output_dir=output_dir,
         no_dedup=no_dedup,
+        workers=workers,
     )
     run_preparation(args)
 
@@ -64,10 +66,13 @@ def data_analyze_command(
 @data_app.command("worldgen")
 def data_worldgen_command(
     num_worlds: int = typer.Option(20, "--num-worlds", help="Number of worlds to generate"),
-    parallel: int = typer.Option(1, "--parallel", help="Number of parallel generation jobs (max 4)"),
+    parallel: Optional[int] = typer.Option(None, "--parallel", help="Parallel generation jobs (default: cpu_count, max 8)"),
 ) -> None:
     """Generate Terraria worlds through the internal worldgen script."""
-    exit_code = worldgen_main(["--num-worlds", str(num_worlds), "--parallel", str(parallel)])
+    argv = ["--num-worlds", str(num_worlds)]
+    if parallel is not None:
+        argv += ["--parallel", str(parallel)]
+    exit_code = worldgen_main(argv)
     if exit_code != 0:
         raise typer.Exit(code=exit_code)
 

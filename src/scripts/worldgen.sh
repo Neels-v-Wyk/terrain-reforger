@@ -55,8 +55,8 @@ GENERATION_TIMEOUT=600
 # Default number of worlds to generate
 DEFAULT_NUM_WORLDS=20
 
-# Parallel generation settings
-MAX_PARALLEL_JOBS=8
+# Parallel generation settings: use all available CPU cores
+MAX_PARALLEL_JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Colors for output
 RED='\033[0;31m'
