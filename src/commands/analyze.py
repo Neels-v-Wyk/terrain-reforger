@@ -10,12 +10,11 @@ from typing import Optional, Sequence
 
 import lihzahrd
 import numpy as np
+from tqdm import tqdm
 
 
 def analyze_world(world_path: Path) -> dict:
     """Analyze a single world file for feature usage."""
-    print(f"\nAnalyzing {world_path.name}...")
-
     world = lihzahrd.World.create_from_file(str(world_path))
 
     stats = {
@@ -47,8 +46,6 @@ def analyze_world(world_path: Path) -> dict:
             stats["total_tiles"] += 1
 
             if stats["total_tiles"] >= next_progress:
-                pct = (stats["total_tiles"] / total_tiles) * 100
-                print(f"    Progress: {pct:.0f}% ({stats['total_tiles']:,} / {total_tiles:,} tiles)")
                 next_progress += progress_interval
 
             if tile.block is not None:
@@ -301,17 +298,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(f"Found {len(world_files)} world files to analyze")
 
     num_workers = min(os.cpu_count() or 1, len(world_files))
-    print(f"Analyzing with {num_workers} parallel worker(s)...")
+    print(f"Analyzing {len(world_files)} world(s) with {num_workers} parallel worker(s)...")
 
     all_stats = []
+    failed = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(analyze_world, wf): wf for wf in world_files}
-        for future in concurrent.futures.as_completed(futures):
-            wf = futures[future]
-            try:
-                all_stats.append(future.result())
-            except Exception as error:
-                print(f"Error analyzing {wf}: {error}")
+        with tqdm(total=len(world_files), unit="world", dynamic_ncols=True) as pbar:
+            for future in concurrent.futures.as_completed(futures):
+                wf = futures[future]
+                try:
+                    all_stats.append(future.result())
+                    pbar.set_postfix(world=wf.name, status="done")
+                except Exception as error:
+                    failed.append(wf.name)
+                    pbar.set_postfix(world=wf.name, status="FAILED")
+                    tqdm.write(f"Error analyzing {wf.name}: {error}")
+                finally:
+                    pbar.update(1)
+
+    if failed:
+        print(f"\nWarnings: {len(failed)} world(s) failed: {', '.join(failed)}")
 
     if not all_stats:
         print("No worlds were successfully analyzed!")
