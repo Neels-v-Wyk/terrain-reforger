@@ -84,10 +84,10 @@ def plot_training_results(results: Dict[str, List[float]], save_dir: str):
 
 def decode_optimized_tile(tensor_slice: np.ndarray) -> Dict[str, Any]:
     """
-    Convert a single optimized tile (9-channel) to human-readable format.
+    Convert a single optimized tile (8-channel) to human-readable format.
     
     Args:
-        tensor_slice: Array of shape (9,)
+        tensor_slice: Array of shape (8,)
         
     Returns:
         Dictionary with human-readable tile information
@@ -96,44 +96,55 @@ def decode_optimized_tile(tensor_slice: np.ndarray) -> Dict[str, Any]:
     block_idx = int(round(tensor_slice[0]))
     block_id = BLOCK_INDEX_TO_ID.get(block_idx, 0)
     
-    # 1: Block Shape (continuous/categorical)
-    block_shape = int(round(float(tensor_slice[1]) * 5.0))
+    # 1: Block Shape (categorical index 0-5)
+    block_shape = int(round(tensor_slice[1]))
+    block_shape = max(0, min(5, block_shape))
     
-    # 2: Wall Type Index (needs mapping)
+    # 2: Wall Type Index
     wall_idx = int(round(tensor_slice[2]))
     wall_id = WALL_INDEX_TO_ID.get(wall_idx, 0)
     
-    # 3: Liquid Present (binary)
-    liquid_present = tensor_slice[3] > 0.5
+    # 3: Liquid Type (Categorical)
+    liquid_type_idx = int(round(tensor_slice[3]))
     
-    # 4: Liquid Type Index (0-4)
-    # 0=None, 1=Water, 2=Lava, 3=Honey, 4=Shimmer
-    liquid_type = int(round(tensor_slice[4]))
+    # 4-7: Wires and Actuator
+    wire_red = tensor_slice[4] > 0.5
+    wire_blue = tensor_slice[5] > 0.5
+    wire_green = tensor_slice[6] > 0.5
+    actuator = tensor_slice[7] > 0.5
     
-    # 5-8: Wires/Actuator
-    wire_red = tensor_slice[5] > 0.5
-    wire_blue = tensor_slice[6] > 0.5
-    wire_green = tensor_slice[7] > 0.5
-    actuator = tensor_slice[8] > 0.5
+    # Format names
+    block_name = BLOCK_NAMES.get(block_id, f"Unknown Block ({block_id})")
+    wall_name = WALL_NAMES.get(wall_id, f"Unknown Wall ({wall_id})")
+    shape_name = BLOCK_SHAPES.get(block_shape, "Full")
+    
+    # Liquid name mapping (0=None, 1=Water, 2=Lava, 3=Honey, 4=Shimmer)
+    liquid_map = {0: "None", 1: "Water", 2: "Lava", 3: "Honey", 4: "Shimmer"}
+    liquid_name = liquid_map.get(liquid_type_idx, "None")
+    
+    
+    # Format names - Reusing logic from above, but cleaner
+    # ... actually the above simple return is sufficient for basic debug.
+    # But let's keep the structured dictionary return for existing consumers.
     
     result = {
         'block': {
             'index': block_idx,
             'id': block_id,
-            'name': BLOCK_NAMES.get(block_id, f"Unknown Block {block_id}"),
-            'shape': BLOCK_SHAPES.get(block_shape, str(block_shape)),
+            'name': block_name,
+            'shape': shape_name,
             'active': block_id > 0
         },
         'wall': {
             'index': wall_idx,
             'id': wall_id,
-            'name': WALL_NAMES.get(wall_id, f"Unknown Wall {wall_id}"),
+            'name': wall_name,
             'active': wall_id > 0
         },
         'liquid': {
-            'present': liquid_present,
-            'type_idx': liquid_type,
-            'name': LIQUID_NAMES.get(liquid_type, "None") if liquid_present else "None"
+            'present': liquid_type_idx > 0,
+            'type_idx': liquid_type_idx,
+            'name': liquid_name
         },
         'wiring': {
             'red': wire_red,
@@ -149,11 +160,23 @@ def format_optimized_tile(tile_data: Dict[str, Any]) -> str:
     """Format optimized tile data into string."""
     parts = []
     
+    # Handle the fact that decode_optimized_tile might return flattened or structured dict
+    # If flattened (my first edit), convert to structured
+    if "block_id" in tile_data:
+        # Convert flat to structured
+        tile_data = {
+             'block': {'active': tile_data['block_id'] > 0, 'name': tile_data['block'], 'shape': tile_data['shape']},
+             'wall': {'active': tile_data['wall_id'] > 0, 'name': tile_data['wall']},
+             'liquid': {'present': tile_data['liquid'] != 'None', 'name': tile_data['liquid']},
+             'wiring': {'red': 'R:1' in tile_data['wires'], 'blue': 'B:1' in tile_data['wires'], 'green': 'G:1' in tile_data['wires']}
+        }
+    
     if tile_data['block']['active']:
         s = f"Block: {tile_data['block']['name']}"
         if tile_data['block']['shape'] != 'Full':
             s += f" ({tile_data['block']['shape']})"
         parts.append(s)
+
         
     if tile_data['wall']['active']:
         parts.append(f"Wall: {tile_data['wall']['name']}")

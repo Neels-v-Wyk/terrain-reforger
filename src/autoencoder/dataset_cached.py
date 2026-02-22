@@ -19,31 +19,43 @@ class CachedTileDataset(Dataset):
     
     def __init__(
         self, 
-        data_dir: Union[str, Path], 
+        data_dir: Union[str, Path, None] = None, 
+        file_paths: Optional[List[Path]] = None,
         preload: bool = True,
         max_cache_size: int = 5,
         verbose: bool = True
     ):
         """
         Args:
-            data_dir: Directory containing .pt files.
+            data_dir: Directory containing .pt files (will glob *.pt if file_paths is None).
+            file_paths: Explicit list of file paths to use. Takes precedence over data_dir glob.
             preload: If True, attempts to load all files into RAM at start.
                      If False, uses LRU cache.
             max_cache_size: Number of files to keep in memory (LRU) when preload=False.
             verbose: Print status messages.
         """
-        self.data_dir = Path(data_dir)
         self.preload = preload
         self.max_cache_size = max_cache_size
         self.verbose = verbose
         
         # 1. Find all files
-        self.file_paths = sorted(list(self.data_dir.glob("*.pt")))
+        if file_paths:
+            self.file_paths = sorted(file_paths)
+            if self.verbose:
+                print(f"Using {len(self.file_paths)} explicit data files")
+        elif data_dir:
+            self.data_dir = Path(data_dir)
+            self.file_paths = sorted(list(self.data_dir.glob("*.pt")))
+            if self.verbose:
+                print(f"Found {len(self.file_paths)} data files in {self.data_dir}")
+        else:
+            raise ValueError("Must provide either data_dir or file_paths")
+            
         if not self.file_paths:
-            raise FileNotFoundError(f"No .pt files found in {self.data_dir}")
-        
-        if self.verbose:
-            print(f"Found {len(self.file_paths)} data files in {self.data_dir}")
+            if data_dir:
+                raise FileNotFoundError(f"No .pt files found in {data_dir}")
+            else:
+                raise ValueError("file_paths list is empty")
 
         # 2. Build Index (Global Index -> File Index, Local Index)
         # We need to know how many chunks are in each file.

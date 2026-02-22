@@ -1,5 +1,5 @@
 """
-Optimized dataset for 9-channel natural world format.
+Optimized dataset for 8-channel natural world format.
 """
 
 import torch
@@ -30,7 +30,7 @@ class PreprocessedTileDataset(Dataset):
         print(f"Loading preprocessed dataset from {self.data_path}...")
         data = torch.load(self.data_path)
         
-        self.chunks = data['chunks']  # (N, 9, H, W)
+        self.chunks = data['chunks']  # (N, 8, H, W)
         self.stats = data['stats']
         self.config = data['config']
         
@@ -45,7 +45,7 @@ class PreprocessedTileDataset(Dataset):
 
 class OptimizedTerrariaTileDataset(Dataset):
     """
-    PyTorch Dataset for Terraria tiles in optimized 9-channel format.
+    PyTorch Dataset for Terraria tiles in optimized 8-channel format.
     """
     
     def __init__(
@@ -85,7 +85,7 @@ class OptimizedTerrariaTileDataset(Dataset):
         print(f"\nOptimized dataset created:")
         print(f"  Total chunks: {len(self.chunks)}")
         print(f"  Chunk size: {self.chunk_size}x{self.chunk_size}")
-        print(f"  Channels: 9 (optimized)")
+        print(f"  Channels: 8 (optimized)")
         self._print_statistics()
     
     def _generate_chunks(self) -> Tuple[List[torch.Tensor], List[ChunkStats]]:

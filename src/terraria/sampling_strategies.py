@@ -62,13 +62,13 @@ def analyze_chunk(chunk_tensor: torch.Tensor) -> ChunkStats:
     """
     Analyze a chunk and calculate diversity statistics.
 
-    Expects the 9-channel optimized format (C, H, W) or (H, W, C) where C=9:
+    Expects the 8-channel optimized format (C, H, W) or (H, W, C) where C=8:
         0: block_type index  1: block_shape  2: wall_type index
-        3: liquid_present    4: liquid_type  5: wire_red
-        6: wire_blue         7: wire_green   8: actuator
+        3: liquid_type       4: wire_red     5: wire_blue
+        6: wire_green        7: actuator
 
     Args:
-        chunk_tensor: Tensor of shape (9, H, W) or (H, W, 9)
+        chunk_tensor: Tensor of shape (8, H, W) or (H, W, 8)
 
     Returns:
         ChunkStats with diversity metrics
@@ -80,16 +80,16 @@ def analyze_chunk(chunk_tensor: torch.Tensor) -> ChunkStats:
         chunk = chunk_tensor
 
     # Ensure (H, W, C) format
-    if chunk.shape[0] == 9:
+    if chunk.shape[0] == 8:
         chunk = np.transpose(chunk, (1, 2, 0))
 
-    # Extract channels (9-channel format)
+    # Extract channels (8-channel format)
     block_types = chunk[:, :, 0].astype(int)
     # Block is active when its index is non-zero (0 = Air in natural_ids)
     block_active = (block_types > 0).astype(np.float32)
     wall_types = chunk[:, :, 2].astype(int)
-    liquid_present = chunk[:, :, 3]
-    wiring = chunk[:, :, 5:9]
+    liquid_type = chunk[:, :, 3].astype(int)
+    wiring = chunk[:, :, 4:8]
 
     # Calculate statistics
     unique_blocks = len(np.unique(block_types[block_active > 0.5]))
@@ -98,7 +98,7 @@ def analyze_chunk(chunk_tensor: torch.Tensor) -> ChunkStats:
     block_entropy = calculate_entropy(block_types[block_active > 0.5]) if unique_blocks > 1 else 0.0
     wall_entropy = calculate_entropy(wall_types[wall_types > 0]) if unique_walls > 1 else 0.0
 
-    has_liquid = bool(np.any(liquid_present > 0.5))
+    has_liquid = bool(np.any(liquid_type > 0))
     has_wiring = bool(np.any(wiring > 0.5))
     
     block_coverage = float(np.mean(block_active > 0.5))

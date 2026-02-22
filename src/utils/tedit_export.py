@@ -40,18 +40,18 @@ LIQUID_TYPE_MAP = {
 
 def tensor_to_tile(tensor_slice: np.ndarray) -> Tile:
     """
-    Convert a single 9-channel tile tensor to a terraschem Tile.
+    Convert a single 8-channel tile tensor to a terraschem Tile.
     
     Args:
-        tensor_slice: Array of shape (9,) representing one tile.
+        tensor_slice: Array of shape (8,) representing one tile.
         
     Returns:
         terraschem Tile object.
     """
     # Channel indices (from vqvae_optimized.py)
-    # 0: block_type, 1: block_shape, 2: wall_type
-    # 3: liquid_present, 4: liquid_type
-    # 5: wire_red, 6: wire_blue, 7: wire_green, 8: actuator
+    # 0: block_type, 1: block_shape (idx), 2: wall_type
+    # 3: liquid_type (0=none)
+    # 4: wire_red, 5: wire_blue, 6: wire_green, 7: actuator
     
     # Block type (index -> game ID)
     block_idx = int(round(tensor_slice[0]))
@@ -61,7 +61,7 @@ def tensor_to_tile(tensor_slice: np.ndarray) -> Tile:
     # Block is active if it's not air (game ID 0)
     is_active = block_game_id > 0
     
-    # Block shape
+    # Block shape (now direct index 0-5)
     shape_val = int(round(tensor_slice[1]))
     shape_val = np.clip(shape_val, 0, 5)
     brick_style = SHAPE_TO_BRICK_STYLE.get(shape_val, BrickStyle.FULL)
@@ -72,11 +72,10 @@ def tensor_to_tile(tensor_slice: np.ndarray) -> Tile:
     wall_game_id = WALL_INDEX_TO_ID.get(wall_idx, 0)
     
     # Liquid
-    liquid_present = tensor_slice[3] > 0.5
-    liquid_type_idx = int(round(tensor_slice[4]))
+    liquid_type_idx = int(round(tensor_slice[3]))
     liquid_type_idx = np.clip(liquid_type_idx, 0, 4)
     
-    if liquid_present:
+    if liquid_type_idx > 0:
         liquid_type = LIQUID_TYPE_MAP.get(liquid_type_idx, LiquidType.NONE)
         liquid_amount = 255  # Full liquid
     else:
@@ -84,10 +83,10 @@ def tensor_to_tile(tensor_slice: np.ndarray) -> Tile:
         liquid_amount = 0
     
     # Wiring
-    wire_red = bool(tensor_slice[5] > 0.5)
-    wire_blue = bool(tensor_slice[6] > 0.5)
-    wire_green = bool(tensor_slice[7] > 0.5)
-    actuator = bool(tensor_slice[8] > 0.5)
+    wire_red = bool(tensor_slice[4] > 0.5)
+    wire_blue = bool(tensor_slice[5] > 0.5)
+    wire_green = bool(tensor_slice[6] > 0.5)
+    actuator = bool(tensor_slice[7] > 0.5)
     
     return Tile(
         is_active=is_active,

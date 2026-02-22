@@ -1,16 +1,15 @@
 """
-Optimized tile conversion for 9-channel natural world format.
+Optimized tile conversion for 8-channel natural world format.
 
-Converts lihzahrd tiles to compact 9-channel representation:
+Converts lihzahrd tiles to compact 8-channel representation:
 0. block_type (index 0-217)
-1. block_shape (0-1 normalized)
+1. block_shape (index 0-5)
 2. wall_type (index 0-76)
-3. liquid_present (0 or 1)
-4. liquid_type (0-4: none, water, lava, honey, shimmer)
-5. wire_red (0 or 1)
-6. wire_blue (0 or 1)
-7. wire_green (0 or 1)
-8. actuator (0 or 1)
+3. liquid_type (0-4: none, water, lava, honey, shimmer)
+4. wire_red (0 or 1)
+5. wire_blue (0 or 1)
+6. wire_green (0 or 1)
+7. actuator (0 or 1)
 """
 
 import numpy as np
@@ -27,15 +26,15 @@ LIQUID_TYPE_MAP = {
 
 def tile_to_optimized_array(tile: lihzahrd.world.Tile) -> np.ndarray:
     """
-    Convert a lihzahrd tile to 9-element numpy array.
+    Convert a lihzahrd tile to 8-element numpy array.
     
     Args:
         tile: Tile from lihzahrd library
         
     Returns:
-        9-element float32 array
+        8-element float32 array
     """
-    data = np.zeros(9, dtype=np.float32)
+    data = np.zeros(8, dtype=np.float32)
     
     # Block information
     if tile.block is not None and tile.block.is_active:
@@ -49,9 +48,9 @@ def tile_to_optimized_array(tile: lihzahrd.world.Tile) -> np.ndarray:
             # Unknown block, map to 0 (air/empty)
             data[0] = 0
         
-        # Block shape (0-5, normalize to 0-1)
+        # Block shape (0-5, categorical)
         shape_val = tile.block.shape.value if hasattr(tile.block.shape, 'value') else tile.block.shape
-        data[1] = shape_val / 5.0 if shape_val <= 5 else 0.0
+        data[1] = float(shape_val) if shape_val <= 5 else 0.0
     
     # Wall information
     if tile.wall is not None:
@@ -69,19 +68,17 @@ def tile_to_optimized_array(tile: lihzahrd.world.Tile) -> np.ndarray:
     if tile.liquid is not None:
         liquid_volume = getattr(tile.liquid, 'volume', getattr(tile.liquid, 'amount', 0))
         if liquid_volume > 0:
-            data[3] = 1.0  # Liquid present
-            
             # Get liquid type
             liquid_type_name = tile.liquid.type.name if hasattr(tile.liquid.type, 'name') else str(tile.liquid.type)
             liquid_type_name = liquid_type_name.upper()
-            data[4] = LIQUID_TYPE_MAP.get(liquid_type_name, 0)
+            data[3] = LIQUID_TYPE_MAP.get(liquid_type_name, 0)
     
     # Wiring information
     if tile.wiring is not None:
-        data[5] = 1.0 if getattr(tile.wiring, 'red', False) else 0.0
-        data[6] = 1.0 if getattr(tile.wiring, 'blue', False) else 0.0
-        data[7] = 1.0 if getattr(tile.wiring, 'green', False) else 0.0
-        data[8] = 1.0 if getattr(tile.wiring, 'actuator', False) else 0.0
+        data[4] = 1.0 if getattr(tile.wiring, 'red', False) else 0.0
+        data[5] = 1.0 if getattr(tile.wiring, 'blue', False) else 0.0
+        data[6] = 1.0 if getattr(tile.wiring, 'green', False) else 0.0
+        data[7] = 1.0 if getattr(tile.wiring, 'actuator', False) else 0.0
     
     return data
 

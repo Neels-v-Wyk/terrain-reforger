@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import os
+import math
+import random
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Optional, Sequence, List
 
 import torch
 from torch.optim import Adam
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, ConcatDataset, Subset
 
 from src.autoencoder.dataset_cached import CachedTileDataset
 from src.autoencoder.dataset_optimized import OptimizedTerrariaTileDataset, PreprocessedTileDataset
@@ -22,12 +24,13 @@ from src.utils.visualization import compare_optimized_tiles, plot_training_resul
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train VQ-VAE on Terraria chunks")
-    parser.add_argument("--data", type=str, help="Path to preprocessed .pt dataset")
-    parser.add_argument("--world", type=str, help="Path to single .wld file (if not using preprocessed data)")
+    parser.add_argument("--data", type=str, help="Path to preprocessed .pt dataset directory or file")
+    parser.add_argument("--world", type=str, help="Path to single .wld file or directory of worlds")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train")
     parser.add_argument("--one-pass", action="store_true", help="Train for exactly one pass over the data (epochs=1)")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
     parser.add_argument("--resume", type=str, help="Resume from checkpoint")
+    parser.add_argument("--val-split", type=float, default=0.1, help="Fraction of data to use for validation (default: 0.1)")
     parser.add_argument("--disk-mode", action="store_true", help="Use disk-based loading with LRU cache (saves RAM)")
     parser.add_argument("--cache-size", type=int, default=5, help="LRU cache size (files) for disk mode")
     # EMA quantizer options
@@ -100,71 +103,149 @@ def run(args: argparse.Namespace) -> None:
         data_path = Path(args.data)
         if data_path.is_dir():
             print(f"Loading cached dataset from directory {data_path}...")
+            all_files = sorted(list(data_path.glob("*.pt")))
+            if not all_files:
+                raise FileNotFoundError(f"No .pt files found in {data_path}")
+            
+            # Split files
+            random.shuffle(all_files)
+            val_count = max(1, int(len(all_files) * args.val_split))
+            val_files = all_files[:val_count]
+            train_files = all_files[val_count:]
+            
+            print(f"  Total files: {len(all_files)}")
+            print(f"  Training files: {len(train_files)}")
+            print(f"  Validation files: {len(val_files)}")
+            
             preload_mode = not args.disk_mode
-            training_data = CachedTileDataset(
-                data_dir=data_path,
+            train_dataset = CachedTileDataset(
+                file_paths=train_files,
                 preload=preload_mode,
                 max_cache_size=args.cache_size,
+                verbose=True
+            )
+            val_dataset = CachedTileDataset(
+                file_paths=val_files,
+                preload=preload_mode, 
+                max_cache_size=args.cache_size,
+                verbose=False
             )
             chunk_size = 32
             print(f"  Chunk size: {chunk_size} (assumed)")
         else:
             print(f"Loading preprocessed dataset from {args.data}...")
-            training_data = PreprocessedTileDataset(args.data)
-            chunk_size = training_data.config["chunk_size"]
+            full_dataset = PreprocessedTileDataset(args.data)
+            chunk_size = full_dataset.config["chunk_size"]
             print(f"  Chunk size: {chunk_size}")
+            
+            # Split indices
+            indices = list(range(len(full_dataset)))
+            random.shuffle(indices)
+            val_count = int(len(indices) * args.val_split)
+            val_indices = indices[:val_count]
+            train_indices = indices[val_count:]
+            
+            train_dataset = Subset(full_dataset, train_indices)
+            val_dataset = Subset(full_dataset, val_indices)
+            print(f"  Training samples: {len(train_dataset)}")
+            print(f"  Validation samples: {len(val_dataset)}")
+
     else:
+        # World loading logic
         if args.world:
-            world_file = args.world
+            world_path = Path(args.world)
+            if world_path.is_dir():
+                worlds = sorted(list(world_path.glob("*.wld")))
+            elif world_path.is_file():
+                worlds = [world_path]
+            else:
+                raise FileNotFoundError(f"World path not found: {world_path}")
         else:
             worldgen_dir = Path("worldgen")
             worlds = sorted(worldgen_dir.glob("*.wld")) if worldgen_dir.exists() else []
             if not worlds:
                 print("No .wld files found. Specify --world or run 'terrain data worldgen' first.")
                 return
-            world_file = str(worlds[0])
-            print(f"Auto-detected world: {world_file}")
+        
+        print(f"Found {len(worlds)} worlds.")
+        random.shuffle(worlds)
+        
+        # Split worlds
+        if len(worlds) > 1:
+            val_count = max(1, int(len(worlds) * args.val_split))
+            val_worlds = worlds[:val_count]
+            train_worlds = worlds[val_count:]
+        else:
+            print("Warning: Only 1 world found. Using it for both training and validation (data leakage!).")
+            train_worlds = worlds
+            val_worlds = worlds
+            
+        print(f"  Training worlds: {len(train_worlds)}")
+        print(f"  Validation worlds: {len(val_worlds)}")
+
         region = (0, 0, 8360, 2360)
         chunk_size = 32
         overlap = 16
 
-        print(f"Creating optimized training dataset from {world_file}...")
-        training_data = OptimizedTerrariaTileDataset(
-            world_path=world_file,
-            region=region,
-            chunk_size=chunk_size,
-            overlap=overlap,
-            use_diversity_filter=True,
-            min_diversity=0.20,
-            deduplicate=True,
+        def create_dataset_from_worlds(world_files):
+            datasets = []
+            for w in world_files:
+                try:
+                    ds = OptimizedTerrariaTileDataset(
+                        world_path=w,
+                        region=region,
+                        chunk_size=chunk_size,
+                        overlap=overlap,
+                        use_diversity_filter=True,
+                        min_diversity=0.20,
+                        deduplicate=True,
+                    )
+                    datasets.append(ds)
+                except Exception as e:
+                    print(f"Error loading world {w}: {e}")
+            if not datasets:
+                raise ValueError("Could not load any datasets from provided worlds")
+            return ConcatDataset(datasets)
+
+        print("Creating training dataset...")
+        train_dataset = create_dataset_from_worlds(train_worlds)
+        print("Creating validation dataset...")
+        val_dataset = create_dataset_from_worlds(val_worlds)
+
+    train_sampler = None
+    train_shuffle = True
+
+    # Use specialized sampler only for CachedTileDataset in disk mode
+    if isinstance(train_dataset, CachedTileDataset) and args.disk_mode:
+        print(f"Using InterleavedFileSampler for training (Cache Size: {args.cache_size})...")
+        train_sampler = InterleavedFileSampler(
+            train_dataset,
+            max_cache_size=args.cache_size,
+            shuffle_files=True,
         )
-
-    sampler = None
-    shuffle = True
-
-    if args.data and Path(args.data).is_dir() and args.disk_mode:
-        if isinstance(training_data, CachedTileDataset):
-            print(f"Using InterleavedFileSampler to optimize disk access (Cache Size: {args.cache_size})...")
-            sampler = InterleavedFileSampler(
-                training_data,
-                max_cache_size=args.cache_size,
-                shuffle_files=True,
-            )
-            shuffle = False
+        train_shuffle = False
 
     train_loader = DataLoader(
-        training_data,
+        train_dataset,
         batch_size=batch_size,
-        shuffle=shuffle,
-        sampler=sampler,
+        shuffle=train_shuffle,
+        sampler=train_sampler,
+        num_workers=0,
+    )
+    
+    val_loader = DataLoader(
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
         num_workers=0,
     )
 
     print("\nTraining configuration:")
     print(f"  Epochs: {num_epochs}")
     print(f"  Batches per epoch: {len(train_loader)}")
-    print(f"  Total training samples: {len(training_data)}")
-    print("  Model: Optimized VQ-VAE (9 channels, 218 blocks, 77 walls)")
+    print(f"  Total training samples: {len(train_dataset)}")
+    print(f"  Total validation samples: {len(val_dataset)}")
+    print("  Model: Optimized VQ-VAE (8 channels)")
     print(f"  Embedding dim: {model_config['embedding_dim']}")
     print(f"  Codebook size: {model_config['n_embeddings']}")
     print(f"  Quantizer: {'EMA' if model_config['use_ema'] else 'Vanilla'} (beta={model_config['beta']})")
@@ -339,6 +420,31 @@ def run(args: argparse.Namespace) -> None:
                 f"Top-10: {usage_stats['top10_share'] * 100:.2f}%"
             )
         print(f"{'=' * 80}\n")
+
+        # Validation Loop
+        print("Running Validation...")
+        model.eval()
+        val_losses = []
+        with torch.no_grad():
+            for val_batch in val_loader:
+                val_batch = val_batch.to(device)
+                emb_loss_val, x_hat_val, perp_val, logits_val = model(val_batch)
+                
+                loss_val, loss_dict_val = compute_optimized_loss(
+                    val_batch, 
+                    x_hat_val, 
+                    logits_val, 
+                    emb_loss_val,
+                    block_loss_weighted=False 
+                )
+                val_losses.append(loss_dict_val['total'])
+        
+        avg_val_loss = sum(val_losses) / max(1, len(val_losses))
+        results.setdefault("val_loss", []).append(avg_val_loss)
+        print(f"Validation Loss: {avg_val_loss:.4f}")
+        print(f"{'=' * 80}\n")
+        
+        model.train() # Switch back to train mode
 
         plot_training_results(results, "checkpoints")
 

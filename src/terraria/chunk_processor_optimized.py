@@ -1,5 +1,5 @@
 """
-Optimized chunk processor for 9-channel format.
+Optimized chunk processor for 8-channel format.
 """
 
 import numpy as np
@@ -15,7 +15,7 @@ def extract_optimized_chunk(
     height: int
 ) -> np.ndarray:
     """
-    Extract a chunk from the world in optimized 9-channel format.
+    Extract a chunk from the world in optimized 8-channel format.
     
     Args:
         world: Loaded lihzahrd World object
@@ -25,9 +25,9 @@ def extract_optimized_chunk(
         height: Chunk height in tiles
         
     Returns:
-        numpy array of shape (height, width, 9) with dtype float32
+        numpy array of shape (height, width, 8) with dtype float32
     """
-    chunk = np.zeros((height, width, 9), dtype=np.float32)
+    chunk = np.zeros((height, width, 8), dtype=np.float32)
     
     for y in range(height):
         world_y = y_start + y
