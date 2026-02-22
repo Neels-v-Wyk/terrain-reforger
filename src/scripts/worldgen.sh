@@ -56,7 +56,7 @@ GENERATION_TIMEOUT=600
 DEFAULT_NUM_WORLDS=20
 
 # Parallel generation settings
-MAX_PARALLEL_JOBS=4
+MAX_PARALLEL_JOBS=8
 
 # Colors for output
 RED='\033[0;31m'
@@ -183,7 +183,7 @@ generate_world() {
     log_debug "Expected world path: ${world_file_path}"
     
     # Wait a moment for the server to initialize
-    sleep 5
+    sleep 2
     
     # Check if the process is still running (early crash before world gen started)
     if ! kill -0 $server_pid 2>/dev/null; then
@@ -222,8 +222,8 @@ generate_world() {
             break
         fi
         
-        sleep 5
-        waited=$((waited + 5))
+        sleep 2
+        waited=$((waited + 2))
         
         # Check if the process is still running
         if ! kill -0 $server_pid 2>/dev/null; then
@@ -245,8 +245,8 @@ generate_world() {
             return 1
         fi
         
-        # Show progress every 30 seconds
-        if [[ $((waited % 30)) -eq 0 ]] && [[ $waited -gt 0 ]]; then
+        # Show progress every 20 seconds
+        if [[ $((waited % 20)) -eq 0 ]] && [[ $waited -gt 0 ]]; then
             log_debug "Still generating... (${waited}s elapsed, process still running)"
         fi
     done
@@ -259,16 +259,11 @@ generate_world() {
         pkill -P $server_pid 2>/dev/null || true
         kill $server_pid 2>/dev/null || true
         
-        # Wait a moment for graceful shutdown
+        # Wait a moment for graceful shutdown, then force kill
         sleep 1
-        
-        # Force kill if still running
         pkill -9 -P $server_pid 2>/dev/null || true
         kill -9 $server_pid 2>/dev/null || true
         wait $server_pid 2>/dev/null || true
-        
-        # Give filesystem time to sync
-        sleep 1
         
         # Find and move the world file from default location to our worldgen directory
         local world_found=false
@@ -372,9 +367,9 @@ main() {
             
             echo
             
-            # Add a small delay between world generations
+            # Small delay between world generations to avoid race conditions
             if [[ $i -lt $num_worlds ]]; then
-                sleep 2
+                sleep 1
             fi
         done
     else
