@@ -122,12 +122,13 @@ def _run_chunked(world_files: List[Path], config: dict, output_dir: Path, num_wo
 
     if num_workers > 1:
         print(f"Processing {len(pending)} world(s) with {num_workers} workers...")
-        with tqdm(total=len(pending), desc="Worlds", unit="world") as outer_pbar:
+        print("(progress bar advances once per completed world)")
+        with tqdm(total=len(pending), desc="Worlds done", unit="world") as outer_pbar:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-                futures = {
-                    executor.submit(process_world, wp, config, True, False): wp
-                    for wp in pending
-                }
+                futures = {}
+                for wp in pending:
+                    tqdm.write(f"  Queued: {wp.name}")
+                    futures[executor.submit(process_world, wp, config, True, False)] = wp
                 for future in concurrent.futures.as_completed(futures):
                     world_path = futures[future]
                     output_path = output_dir / f"{world_path.stem}.pt"
@@ -166,12 +167,13 @@ def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, 
 
     if num_workers > 1:
         print(f"Processing {len(world_files)} world(s) with {num_workers} workers...")
-        with tqdm(total=len(world_files), desc="Worlds", unit="world") as outer_pbar:
+        print("(progress bar advances once per completed world)")
+        with tqdm(total=len(world_files), desc="Worlds done", unit="world") as outer_pbar:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-                futures = {
-                    executor.submit(process_world, wp, config, True, False): wp
-                    for wp in world_files
-                }
+                futures = {}
+                for wp in world_files:
+                    tqdm.write(f"  Queued: {wp.name}")
+                    futures[executor.submit(process_world, wp, config, True, False)] = wp
                 for future in concurrent.futures.as_completed(futures):
                     world_path = futures[future]
                     try:
