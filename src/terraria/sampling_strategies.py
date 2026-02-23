@@ -352,40 +352,34 @@ def deduplicate_chunks(chunks: List[torch.Tensor],
              return [], []
         return []
     
-    # Use block type histogram as fingerprint
-    fingerprints = []
+    # Use exact block-type content as fingerprint (O(N) hash-set lookup).
+    # The old histogram approach collapsed chunks with the same composition but
+    # different spatial layout into duplicates, removing ~99% of valid chunks.
+    seen_hashes: set = set()
     unique_chunks = []
     unique_stats = []
-    
+
     for i, chunk in enumerate(chunks):
         if isinstance(chunk, torch.Tensor):
             chunk_np = chunk.cpu().numpy()
         else:
-            chunk_np = chunk
-        
-        # Get block types
-        if chunk_np.shape[0] == 17:
-            block_types = chunk_np[0].flatten()
+            chunk_np = np.asarray(chunk)
+
+        # Extract block-type channel and quantise to int for a stable hash.
+        if chunk_np.ndim == 3 and chunk_np.shape[0] >= 1:  # (C, H, W)
+            block_types = chunk_np[0]
+        elif chunk_np.ndim == 3 and chunk_np.shape[2] >= 1:  # (H, W, C)
+            block_types = chunk_np[:, :, 0]
         else:
-            block_types = chunk_np[:, :, 0].flatten()
-        
-        # Create histogram fingerprint
-        hist, _ = np.histogram(block_types, bins=50, range=(0, 700))
-        fingerprint = hist / (hist.sum() + 1e-10)
-        
-        # Check similarity to existing chunks
-        is_duplicate = False
-        for existing_fp in fingerprints:
-            similarity = 1 - np.sum(np.abs(fingerprint - existing_fp)) / 2
-            if similarity >= similarity_threshold:
-                is_duplicate = True
-                break
-        
-        if not is_duplicate:
-            fingerprints.append(fingerprint)
+            block_types = chunk_np
+
+        key = block_types.round().astype(np.int16).tobytes()
+
+        if key not in seen_hashes:
+            seen_hashes.add(key)
             unique_chunks.append(chunk)
             if stats_list is not None and i < len(stats_list):
-                 unique_stats.append(stats_list[i])
+                unique_stats.append(stats_list[i])
     
     if stats_list is not None:
         return unique_chunks, unique_stats

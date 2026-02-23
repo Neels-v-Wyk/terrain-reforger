@@ -120,6 +120,8 @@ def _run_chunked(world_files: List[Path], config: dict, output_dir: Path, num_wo
         print(f"All worlds already processed. Done.")
         return
 
+    failed_worlds: List[Path] = []
+
     if num_workers > 1:
         print(f"Processing {len(pending)} world(s) with {num_workers} workers...")
         with tqdm(total=len(pending), desc="Worlds done", unit="world") as outer_pbar:
@@ -140,8 +142,24 @@ def _run_chunked(world_files: List[Path], config: dict, output_dir: Path, num_wo
                             outer_pbar.set_postfix(world=world_path.name, chunks=0)
                     except Exception as error:
                         tqdm.write(f"Error processing {world_path.name}: {error}")
+                        failed_worlds.append(world_path)
                     finally:
                         outer_pbar.update(1)
+
+        if failed_worlds:
+            print(f"\n{len(failed_worlds)} world(s) failed in pool -- retrying sequentially...")
+            for world_path in failed_worlds:
+                output_path = output_dir / f"{world_path.stem}.pt"
+                print(f"  Retrying {world_path.name}...")
+                try:
+                    chunks = process_world(world_path, config, skip_errors=True)
+                    if chunks:
+                        _save_chunk_file(output_path, chunks, config, str(world_path.name))
+                        print(f"    Saved {len(chunks)} chunks")
+                    else:
+                        print(f"    No interesting chunks found")
+                except Exception as error:
+                    print(f"    Failed again: {error}")
     else:
         for world_path in pending:
             output_path = output_dir / f"{world_path.stem}.pt"
@@ -164,6 +182,8 @@ def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, 
     os.makedirs(output_path.parent, exist_ok=True)
     all_chunks: List[torch.Tensor] = []
 
+    failed_worlds: List[Path] = []
+
     if num_workers > 1:
         print(f"Processing {len(world_files)} world(s) with {num_workers} workers...")
         with tqdm(total=len(world_files), desc="Worlds done", unit="world") as outer_pbar:
@@ -180,8 +200,20 @@ def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, 
                         outer_pbar.set_postfix(world=world_path.name, chunks=len(chunks))
                     except Exception as error:
                         tqdm.write(f"Error processing {world_path.name}: {error}")
+                        failed_worlds.append(world_path)
                     finally:
                         outer_pbar.update(1)
+
+        if failed_worlds:
+            print(f"\n{len(failed_worlds)} world(s) failed in pool -- retrying sequentially...")
+            for world_path in failed_worlds:
+                print(f"  Retrying {world_path.name}...")
+                try:
+                    chunks = process_world(world_path, config)
+                    print(f"    Accepted {len(chunks)} chunks")
+                    all_chunks.extend(chunks)
+                except Exception as error:
+                    print(f"    Failed again: {error}")
     else:
         for world_path in world_files:
             print(f"Loading {world_path.name}...")
