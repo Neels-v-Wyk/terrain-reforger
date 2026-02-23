@@ -122,7 +122,6 @@ def _run_chunked(world_files: List[Path], config: dict, output_dir: Path, num_wo
 
     if num_workers > 1:
         print(f"Processing {len(pending)} world(s) with {num_workers} workers...")
-        print("(progress bar advances once per completed world)")
         with tqdm(total=len(pending), desc="Worlds done", unit="world") as outer_pbar:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = {}
@@ -167,7 +166,6 @@ def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, 
 
     if num_workers > 1:
         print(f"Processing {len(world_files)} world(s) with {num_workers} workers...")
-        print("(progress bar advances once per completed world)")
         with tqdm(total=len(world_files), desc="Worlds done", unit="world") as outer_pbar:
             with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
                 futures = {}
