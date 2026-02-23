@@ -100,6 +100,7 @@ def model_train_command(
     block_weight_max: float = typer.Option(5.0, "--block-weight-max", help="Maximum block class weight clamp"),
     no_ema: bool = typer.Option(False, "--no-ema", help="Disable EMA quantizer (use vanilla VQ-VAE)"),
     metrics_stride: int = typer.Option(50, "--metrics-stride", help="Store metrics every N updates"),
+    val_split: float = typer.Option(0.1, "--val-split", help="Fraction of data to use for validation"),
 ) -> None:
     """Train the VQ-VAE model."""
     run_train(argparse.Namespace(
@@ -120,6 +121,7 @@ def model_train_command(
         block_weight_min=block_weight_min,
         block_weight_max=block_weight_max,
         metrics_stride=metrics_stride,
+        val_split=val_split,
     ))
 
 
