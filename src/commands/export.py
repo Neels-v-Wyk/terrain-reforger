@@ -131,7 +131,7 @@ def run(args: argparse.Namespace) -> int:
     print(f"Size: {width}x{height} tiles")
     print(f"Output: {args.output_dir}/")
 
-    # Load model — read architecture config from the checkpoint so the right
+    # Load model, read architecture config from the checkpoint so the right
     # number of embeddings / dimensions are used even if they differ from the default.
     ckpt_config = read_checkpoint_config(model_path, str(device))
     if not ckpt_config:
@@ -277,7 +277,7 @@ def run(args: argparse.Namespace) -> int:
         print(f"  *_reconstructed.TEditSch - After passing through the VAE")
     
     print(f"\nTo import in TEdit:")
-    print(f"  File → Import Schematic → Select .TEditSch file")
+    print(f"  File -> Import Schematic -> Select .TEditSch file")
 
     return 0
 

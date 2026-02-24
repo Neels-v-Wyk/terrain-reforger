@@ -22,7 +22,7 @@ terrain data worldgen --num-worlds 20
 ```
 Outputs `.wld` files to `worldgen/`.
 
-### 2. Analyze worlds (optional — regenerates `src/terraria/natural_ids.py`)
+### 2. Analyze worlds (optional, regenerates `src/terraria/natural_ids.py`)
 ```bash
 terrain data analyze
 ```
@@ -57,7 +57,7 @@ terrain model infer
 # Export original + reconstructed region as TEdit schematics
 terrain model export --x 1500 --y 500 --width 64 --height 64
 ```
-Schematics are written to `exports/` and can be imported via TEdit → File → Import Schematic.
+Schematics are written to `exports/` and can be imported via TEdit -> File -> Import Schematic.
 
 ## Notes
 

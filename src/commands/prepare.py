@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import torch
 from tqdm import tqdm
 
-from src.terraria.chunk_processor import extract_chunk
+from src.terraria.chunk_processor import world_to_array, extract_chunk_from_array
 from src.terraria.sampling_strategies import DiversitySampler, analyze_chunk, deduplicate_chunks
 from src.terraria.world_handler import load_world
 
@@ -30,7 +30,12 @@ def find_world_files(source_dir: Path) -> List[Path]:
 
 
 def process_world(world_path: Path, config: Dict[str, Any], skip_errors: bool = True, verbose: bool = True) -> List[torch.Tensor]:
-    """Extract diversity-filtered chunks from a single world file."""
+    """Extract diversity-filtered chunks from a single world file.
+
+    Uses ``world_to_array`` to convert the world to a NumPy array in one pass,
+    then extracts each candidate window via a fast array slice instead of
+    re-iterating tiles per chunk.
+    """
     world = load_world(world_path)
 
     x_start, y_start = 50, 50
@@ -43,6 +48,12 @@ def process_world(world_path: Path, config: Dict[str, Any], skip_errors: bool = 
         adaptive=True,
     )
 
+    # --- Vectorized world conversion (single tile-walk) ---
+    if verbose:
+        tqdm.write(f"  [{world_path.name}] Converting world to array ({world.size.x}x{world.size.y} tiles)...")
+    world_array = world_to_array(world)
+    del world  # release lihzahrd object; world_array has everything we need
+
     chunks: List[torch.Tensor] = []
     total_possible = ((y_end - y_start) // step) * ((x_end - x_start) // step)
 
@@ -50,7 +61,7 @@ def process_world(world_path: Path, config: Dict[str, Any], skip_errors: bool = 
         for y in range(y_start, y_end, step):
             for x in range(x_start, x_end, step):
                 try:
-                    chunk_np = extract_chunk(world, x, y, config["chunk_size"], config["chunk_size"])
+                    chunk_np = extract_chunk_from_array(world_array, x, y, config["chunk_size"], config["chunk_size"])
                     tensor = torch.from_numpy(chunk_np).permute(2, 0, 1).float()
                     should_accept, _ = sampler.should_accept(tensor)
                     if should_accept:
@@ -275,6 +286,42 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _safe_worker_count(requested: int) -> int:
+    """Cap *requested* workers to avoid OOM.
+
+    Each worker materialises a full world as a ``(H, W, 8)`` float32 array
+    (~645 MB) plus the lihzahrd object tree and extracted chunk tensors.
+    This function reads ``MemAvailable`` from ``/proc/meminfo`` (Linux) and
+    computes the maximum number of workers that fit, leaving 1 GB headroom.
+    Falls back to 1 worker if available RAM cannot be determined.
+    """
+    # Conservative per-worker peak: world array + lihzahrd objects + chunks.
+    PER_WORKER_MB = 2048  # 2 GB
+    HEADROOM_MB   = 1024  # 1 GB reserved for OS + main process
+
+    avail_mb: int | None = None
+    try:
+        with open("/proc/meminfo") as _f:
+            for _line in _f:
+                if _line.startswith("MemAvailable:"):
+                    avail_mb = int(_line.split()[1]) // 1024  # kB -> MB
+                    break
+    except OSError:
+        pass
+
+    if avail_mb is None:
+        safe = 1
+        reason = "available RAM unknown — defaulting to 1 worker"
+    else:
+        safe = max(1, (avail_mb - HEADROOM_MB) // PER_WORKER_MB)
+        reason = f"{avail_mb} MB available, ~{PER_WORKER_MB/1024:.0f} GB per worker"
+
+    if safe < requested:
+        print(f"  [memory cap] Workers capped {requested} -> {safe}  ({reason})")
+
+    return min(requested, safe)
+
+
 def run_preparation(args: argparse.Namespace) -> None:
     """Entry point callable from the Typer CLI (receives a parsed Namespace)."""
     import os as _os
@@ -291,6 +338,7 @@ def run_preparation(args: argparse.Namespace) -> None:
     print(f"Found {len(world_files)} worlds.")
 
     num_workers = getattr(args, "workers", None) or _os.cpu_count() or 1
+    num_workers = _safe_worker_count(num_workers)
     print(f"Using {num_workers} worker process(es).")
 
     if args.mode == "chunked":
