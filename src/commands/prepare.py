@@ -136,7 +136,10 @@ def _run_chunked(world_files: List[Path], config: dict, output_dir: Path, num_wo
     if num_workers > 1:
         print(f"Processing {len(pending)} world(s) with {num_workers} workers...")
         with tqdm(total=len(pending), desc="Worlds done", unit="world") as outer_pbar:
-            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=num_workers,
+                max_tasks_per_child=1,  # exit & respawn after each world, clean memory slate
+            ) as executor:
                 futures = {}
                 for wp in pending:
                     tqdm.write(f"  Queued: {wp.name}")
@@ -198,7 +201,10 @@ def _run_consolidated(world_files: List[Path], config: dict, output_path: Path, 
     if num_workers > 1:
         print(f"Processing {len(world_files)} world(s) with {num_workers} workers...")
         with tqdm(total=len(world_files), desc="Worlds done", unit="world") as outer_pbar:
-            with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+            with concurrent.futures.ProcessPoolExecutor(
+                max_workers=num_workers,
+                max_tasks_per_child=1,  # exit & respawn after each world — clean memory slate
+            ) as executor:
                 futures = {}
                 for wp in world_files:
                     tqdm.write(f"  Queued: {wp.name}")
