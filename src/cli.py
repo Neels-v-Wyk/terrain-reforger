@@ -9,8 +9,10 @@ import typer
 from rich.console import Console
 
 from src.commands.analyze import main as analyze_main
+from src.commands.diagnose import run as run_diagnose
 from src.commands.export import run as run_export
 from src.commands.infer import run as run_infer
+from src.commands.lr_find import run as run_lr_find
 from src.commands.prepare import run_preparation
 from src.commands.train import run as run_train
 from src.commands.worldgen import main as worldgen_main
@@ -88,6 +90,7 @@ def model_train_command(
     epochs: int = typer.Option(50, "--epochs", help="Number of epochs"),
     one_pass: bool = typer.Option(False, "--one-pass", help="Train for exactly one pass over the data"),
     batch_size: int = typer.Option(16, "--batch-size", help="Batch size"),
+    learning_rate: float = typer.Option(2e-4, "--learning-rate", "--lr", help="Learning rate"),
     resume: Optional[str] = typer.Option(None, "--resume", help="Resume from checkpoint path"),
     disk_mode: bool = typer.Option(False, "--disk-mode", help="Use LRU disk-mode dataset loading"),
     cache_size: int = typer.Option(5, "--cache-size", help="LRU cache size for disk mode"),
@@ -109,6 +112,7 @@ def model_train_command(
         epochs=epochs,
         one_pass=one_pass,
         batch_size=batch_size,
+        learning_rate=learning_rate,
         resume=resume,
         disk_mode=disk_mode,
         cache_size=cache_size,
@@ -122,6 +126,62 @@ def model_train_command(
         block_weight_max=block_weight_max,
         metrics_stride=metrics_stride,
         val_split=val_split,
+    ))
+
+
+@model_app.command("diagnose")
+def model_diagnose_command(
+    data: str = typer.Option(..., "--data", help="Path to preprocessed dataset (.pt) or cache dir"),
+    subset_fraction: float = typer.Option(0.2, "--subset-fraction", help="Fraction of data to use"),
+    epochs: int = typer.Option(1, "--epochs", help="Number of diagnostic epochs"),
+    batch_size: int = typer.Option(16, "--batch-size", help="Batch size"),
+    checkpoint: Optional[str] = typer.Option(None, "--checkpoint", help="Optional checkpoint to load and evaluate"),
+    output: str = typer.Option("checkpoints/diagnostic.json", "--output", help="Output path for report"),
+    beta: float = typer.Option(0.25, "--beta", help="Commitment loss weight"),
+    ema_decay: float = typer.Option(0.99, "--ema-decay", help="EMA decay rate"),
+    no_ema: bool = typer.Option(False, "--no-ema", help="Disable EMA quantizer"),
+    block_loss_weighted: bool = typer.Option(False, "--block-loss-weighted", help="Use class-weighted block loss"),
+) -> None:
+    """Run quick diagnostics on training setup (fast validation on data subset)."""
+    run_diagnose(argparse.Namespace(
+        data=data,
+        subset_fraction=subset_fraction,
+        epochs=epochs,
+        batch_size=batch_size,
+        checkpoint=checkpoint,
+        output=output,
+        beta=beta,
+        ema_decay=ema_decay,
+        no_ema=no_ema,
+        block_loss_weighted=block_loss_weighted,
+    ))
+
+
+@model_app.command("lr-find")
+def model_lr_find_command(
+    data: str = typer.Option(..., "--data", help="Path to preprocessed dataset"),
+    min_lr: float = typer.Option(1e-6, "--min-lr", help="Minimum LR to test"),
+    max_lr: float = typer.Option(1e-2, "--max-lr", help="Maximum LR to test"),
+    steps: int = typer.Option(300, "--steps", help="Number of LR test steps"),
+    subset_fraction: float = typer.Option(0.1, "--subset-fraction", help="Fraction of data to use"),
+    batch_size: int = typer.Option(16, "--batch-size", help="Batch size"),
+    smoothing: float = typer.Option(0.05, "--smoothing", help="Loss smoothing factor"),
+    output: str = typer.Option("checkpoints/lr_finder.png", "--output", help="Output plot path"),
+    beta: float = typer.Option(0.25, "--beta", help="Commitment loss weight"),
+    no_plot: bool = typer.Option(False, "--no-plot", help="Don't display plot, just save"),
+) -> None:
+    """Find optimal learning rate using LR range test (Leslie Smith method)."""
+    run_lr_find(argparse.Namespace(
+        data=data,
+        min_lr=min_lr,
+        max_lr=max_lr,
+        steps=steps,
+        subset_fraction=subset_fraction,
+        batch_size=batch_size,
+        smoothing=smoothing,
+        output=output,
+        beta=beta,
+        no_plot=no_plot,
     ))
 
 

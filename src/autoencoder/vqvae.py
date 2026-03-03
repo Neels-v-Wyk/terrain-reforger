@@ -210,12 +210,14 @@ class VQVAE(nn.Module):
         ema_decay: float = 0.99,
         ema_reset_threshold: float = 0.5,
         ema_reset_interval: int = 500,
+        enable_encoder_decoder_tracking: bool = True,
     ):
         super().__init__()
         
         self.embedding_dim = embedding_dim
         self.use_ema = use_ema
         self.n_embeddings = n_embeddings
+        self.enable_encoder_decoder_tracking = enable_encoder_decoder_tracking
         
         # Tile-specific encoder/decoder
         self.tile_encoder = TileEncoder(embedding_dim)
@@ -237,6 +239,15 @@ class VQVAE(nn.Module):
         else:
             self.vq = VectorQuantizer(n_embeddings, h_dim, beta)
         
+        # Auxiliary decoder for pre-quantization reconstruction (measures encoder quality)
+        # Lightweight: just upsamples and decodes directly from continuous latents
+        if enable_encoder_decoder_tracking:
+            self.aux_decoder = Decoder(h_dim, res_h_dim, 2, res_h_dim, out_dim=res_h_dim)
+            self.aux_tile_decoder = TileDecoder(res_h_dim)
+        else:
+            self.aux_decoder = None
+            self.aux_tile_decoder = None
+        
         # Standard convolutional decoder  
         self.conv_decoder = Decoder(h_dim, res_h_dim, 2, res_h_dim, out_dim=res_h_dim)
         
@@ -244,7 +255,7 @@ class VQVAE(nn.Module):
         self.tile_decoder = TileDecoder(res_h_dim)
     
     def forward(
-        self, x: torch.Tensor
+        self, x: torch.Tensor, compute_aux_reconstruction: bool = False
     ) -> Tuple[
         torch.Tensor,
         torch.Tensor,
@@ -254,12 +265,15 @@ class VQVAE(nn.Module):
         """
         Args:
             x: (B, 8, H, W) input tile tensor
+            compute_aux_reconstruction: If True and tracking enabled, compute pre-quantization reconstruction
             
         Returns:
             embedding_loss: VQ loss
             x_hat: (B, 8, H, W) reconstructed tiles
             perplexity: Codebook usage metric
             logits: Tuple of (block_logits, block_shape_logits, wall_logits, liquid_logits) for loss computation
+            
+        Note: When compute_aux_reconstruction=True, also stores aux_reconstruction and aux_logits as attributes
         """
         # Encode with tile-specific embeddings
         tile_encoded = self.tile_encoder(x)  # (B, 102, H, W)
@@ -267,8 +281,20 @@ class VQVAE(nn.Module):
         # Convolutional encoding
         z_e = self.conv_encoder(tile_encoded)  # (B, h_dim, H', W')
         
+        # Optional: Auxiliary reconstruction from continuous latents (measures encoder quality)
+        if compute_aux_reconstruction and self.enable_encoder_decoder_tracking and self.aux_decoder is not None:
+            with torch.no_grad():  # Don't train auxiliary decoder, just use for monitoring
+                aux_decoded = self.aux_decoder(z_e)  # (B, res_h_dim, H', W')
+                self.aux_reconstruction, self.aux_logits = self.aux_tile_decoder(aux_decoded)
+        else:
+            self.aux_reconstruction = None
+            self.aux_logits = None
+        
         # Vector quantization
-        embedding_loss, z_q, perplexity, _, _ = self.vq(z_e)
+        embedding_loss, z_q, perplexity, _, encodings = self.vq(z_e)
+        
+        # Store encodings for codebook analysis
+        self.last_encodings = encodings
         
         # Convolutional decoding
         decoded = self.conv_decoder(z_q)  # (B, res_h_dim, H', W')
@@ -309,6 +335,8 @@ def compute_loss(
     block_weight_min: float = 0.5,
     block_weight_max: float = 5.0,
     binary_loss_weight: float = 1.0,
+    aux_reconstruction: Optional[torch.Tensor] = None,
+    aux_logits: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = None,
 ) -> Tuple[torch.Tensor, dict]:
     """
     Compute loss for model.
@@ -322,6 +350,8 @@ def compute_loss(
         block_weight_min: Minimum class weight clamp when weighted CE is enabled
         block_weight_max: Maximum class weight clamp when weighted CE is enabled
         binary_loss_weight: Weight applied to BCE over binary channels
+        aux_reconstruction: Optional pre-quantization reconstruction (for encoder loss)
+        aux_logits: Optional pre-quantization logits (for encoder loss)
         
     Returns:
         total_loss: Combined loss
@@ -386,4 +416,31 @@ def compute_loss(
         'embedding': embedding_loss.item()
     }
     
+    # Compute encoder/decoder decomposition if auxiliary reconstruction is provided
+    if aux_reconstruction is not None and aux_logits is not None:
+        aux_block_logits, aux_block_shape_logits, aux_wall_logits, aux_liquid_logits = aux_logits
+        
+        # Encoder loss (pre-quantization reconstruction quality)
+        aux_block_loss = F.cross_entropy(aux_block_logits, block_target)
+        aux_shape_loss = F.cross_entropy(aux_block_shape_logits, block_shape_target)
+        aux_wall_loss = F.cross_entropy(aux_wall_logits, wall_target)
+        aux_liquid_loss = F.cross_entropy(aux_liquid_logits, liquid_target)
+        
+        aux_binary_pred = torch.clamp(aux_reconstruction[:, binary_indices, :, :], 1e-6, 1 - 1e-6)
+        aux_continuous_loss = binary_loss_weight * F.binary_cross_entropy(aux_binary_pred, binary_target)
+        
+        aux_categorical_loss = aux_block_loss + aux_shape_loss + aux_wall_loss + aux_liquid_loss
+        encoder_loss = aux_categorical_loss + aux_continuous_loss
+        
+        # Decoder loss = full reconstruction loss
+        decoder_loss = reconstruction_loss
+        
+        # Quantization penalty = additional error from discretization
+        quantization_penalty = decoder_loss.item() - encoder_loss.item()
+        
+        loss_dict['encoder_loss'] = encoder_loss.item()
+        loss_dict['decoder_loss'] = decoder_loss.item()
+        loss_dict['quantization_penalty'] = quantization_penalty
+    
     return total_loss, loss_dict
+

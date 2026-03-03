@@ -55,6 +55,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs to train")
     parser.add_argument("--one-pass", action="store_true", help="Train for exactly one pass over the data (epochs=1)")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
+    parser.add_argument("--learning-rate", "--lr", type=float, default=2e-4, help="Learning rate (default: 2e-4)")
     parser.add_argument("--resume", type=str, help="Resume from checkpoint")
     parser.add_argument("--val-split", type=float, default=0.1, help="Fraction of data to use for validation (default: 0.1)")
     parser.add_argument("--disk-mode", action="store_true", help="Use disk-based loading with LRU cache (saves RAM)")
@@ -118,10 +119,12 @@ def run(args: argparse.Namespace) -> None:
         # Reinitialize codes used less than (multiplier / n_embeddings)
         "ema_reset_threshold": args.ema_reset_multiplier,
         "ema_reset_interval": args.ema_reset_interval,
+        # Enable encoder/decoder tracking
+        "enable_encoder_decoder_tracking": True,
     }
 
     batch_size = args.batch_size
-    learning_rate = 2e-4
+    learning_rate = args.learning_rate
     num_epochs = 1 if args.one_pass else args.epochs
     checkpoint_interval = 500
 
@@ -269,6 +272,7 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Batches per epoch: {len(train_loader)}")
     print(f"  Total training samples: {len(train_dataset)}")
     print(f"  Total validation samples: {len(val_dataset)}")
+    print(f"  Learning rate: {learning_rate:.2e}")
     print("  Model: VQ-VAE (8 channels)")
     print(f"  Embedding dim: {model_config['embedding_dim']}")
     print(f"  Codebook size: {model_config['n_embeddings']}")
@@ -299,6 +303,10 @@ def run(args: argparse.Namespace) -> None:
         "wall_loss": [],
         "liquid_loss": [],
         "continuous_loss": [],
+        "encoder_loss": [],
+        "decoder_loss": [],
+        "quantization_penalty": [],
+        "quantization_error": [],
         "n_updates": 0,
     }
 
@@ -342,6 +350,9 @@ def run(args: argparse.Namespace) -> None:
             "liquid": [],
             "continuous": [],
             "embedding": [],
+            "encoder_loss": [],
+            "decoder_loss": [],
+            "quantization_penalty": [],
         }
         epoch_perplexities = []
 
@@ -349,8 +360,15 @@ def run(args: argparse.Namespace) -> None:
             batch = batch.to(device)
             last_batch = batch
 
-            embedding_loss, x_hat, perplexity, logits = model(batch)
+            # Compute auxiliary reconstruction every N batches for encoder/decoder tracking
+            compute_aux = (batch_idx % 10 == 0) and model_config.get("enable_encoder_decoder_tracking", True)
+            
+            embedding_loss, x_hat, perplexity, logits = model(batch, compute_aux_reconstruction=compute_aux)
             last_reconstruction = x_hat
+
+            # Get auxiliary reconstruction if computed
+            aux_reconstruction = getattr(model, 'aux_reconstruction', None) if compute_aux else None
+            aux_logits = getattr(model, 'aux_logits', None) if compute_aux else None
 
             total_loss, loss_dict = compute_loss(
                 batch,
@@ -360,6 +378,8 @@ def run(args: argparse.Namespace) -> None:
                 block_loss_weighted=args.block_loss_weighted,
                 block_weight_min=args.block_weight_min,
                 block_weight_max=args.block_weight_max,
+                aux_reconstruction=aux_reconstruction,
+                aux_logits=aux_logits,
             )
 
             optimizer.zero_grad()
@@ -367,7 +387,8 @@ def run(args: argparse.Namespace) -> None:
             optimizer.step()
 
             for key in epoch_losses:
-                epoch_losses[key].append(loss_dict[key])
+                if key in loss_dict:
+                    epoch_losses[key].append(loss_dict[key])
             epoch_perplexities.append(perplexity.item())
 
             update_count += 1
@@ -382,6 +403,11 @@ def run(args: argparse.Namespace) -> None:
                 results["wall_loss"].append(loss_dict["wall"])
                 results["liquid_loss"].append(loss_dict["liquid"])
                 results["continuous_loss"].append(loss_dict["continuous"])
+                # Track encoder/decoder metrics if available
+                if "encoder_loss" in loss_dict:
+                    results["encoder_loss"].append(loss_dict["encoder_loss"])
+                    results["decoder_loss"].append(loss_dict["decoder_loss"])
+                    results["quantization_penalty"].append(loss_dict["quantization_penalty"])
 
             if update_count % checkpoint_interval == 0:
                 avg_loss = sum(epoch_losses["total"][-checkpoint_interval:]) / min(
@@ -410,7 +436,7 @@ def run(args: argparse.Namespace) -> None:
                     f"Loss: {recent_loss:.4f} Perplexity: {recent_perp:.2f}"
                 )
 
-        avg_losses = {key: sum(values) / len(values) for key, values in epoch_losses.items()}
+        avg_losses = {key: sum(values) / len(values) if len(values) > 0 else 0.0 for key, values in epoch_losses.items()}
         avg_perplexity = sum(epoch_perplexities) / len(epoch_perplexities)
 
         print(f"\n{'=' * 80}")
@@ -424,6 +450,14 @@ def run(args: argparse.Namespace) -> None:
         print(f"      Liquid: {avg_losses['liquid']:.4f}")
         print(f"    Continuous: {avg_losses['continuous']:.4f}")
         print(f"  Embedding: {avg_losses['embedding']:.4f}")
+        
+        # Show encoder/decoder breakdown if available
+        if avg_losses.get('encoder_loss', 0) > 0 and avg_losses.get('decoder_loss', 0) > 0:
+            print(f"\n  Encoder/Decoder Decomposition:")
+            print(f"    Encoder Loss (pre-quant): {avg_losses['encoder_loss']:.4f}")
+            print(f"    Decoder Loss (post-quant): {avg_losses['decoder_loss']:.4f}")
+            print(f"    Quantization Penalty: {avg_losses['quantization_penalty']:.4f}")
+        
         print(f"  Perplexity: {avg_perplexity:.2f}")
         print(f"  Codebook usage (perplexity-based): {(avg_perplexity / model_config['n_embeddings']) * 100:.1f}%")
         
