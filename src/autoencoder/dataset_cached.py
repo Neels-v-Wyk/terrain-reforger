@@ -83,7 +83,7 @@ class CachedTileDataset(Dataset):
             try:
                 # We have to load to count, unless we trust a sidecar file. 
                 # Assuming standard .pt loading for now.
-                data = torch.load(fpath, map_location='cpu')
+                data = torch.load(fpath, map_location='cpu', weights_only=False)
                 
                 # Handle different formats
                 if isinstance(data, dict):
@@ -157,7 +157,7 @@ class CachedTileDataset(Dataset):
             self.lru_cache.popitem(last=False) # Remove FIFO (least recently used)
             
         fpath = self.file_paths[file_idx]
-        data = torch.load(fpath, map_location='cpu')
+        data = torch.load(fpath, map_location='cpu', weights_only=False)
         
         if isinstance(data, dict):
             chunks = data.get('chunks')

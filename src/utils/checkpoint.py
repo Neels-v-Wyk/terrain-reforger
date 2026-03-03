@@ -177,7 +177,7 @@ class CheckpointManager:
         print(f"Loading checkpoint: {checkpoint_path}")
         
         # Load checkpoint
-        checkpoint = torch.load(checkpoint_path, map_location=device)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         
         # Load model state
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -356,7 +356,7 @@ def load_model_for_inference(
     print(f"Loading model from: {model_path}")
     
     # Load model data
-    checkpoint = torch.load(model_path, map_location=device)
+    checkpoint = torch.load(model_path, map_location=device, weights_only=False)
     
     # Extract state dict (handle both checkpoint and weights-only files)
     if 'model_state_dict' in checkpoint:

@@ -28,7 +28,7 @@ class PreprocessedTileDataset(Dataset):
         self.data_path = Path(data_path)
         
         print(f"Loading preprocessed dataset from {self.data_path}...")
-        data = torch.load(self.data_path)
+        data = torch.load(self.data_path, weights_only=False)
         
         self.chunks = data['chunks']  # (N, 8, H, W)
         self.stats = data['stats']
