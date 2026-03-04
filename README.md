@@ -83,3 +83,5 @@ Run any command with `--help` for options.
 - `data/` - Prepared datasets
 - `exports/` - TEdit schematic exports
 
+See [TRAINING_IMPROVEMENTS.md](TRAINING_IMPROVEMENTS.md) for detailed feature documentation.
+

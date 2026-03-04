@@ -306,7 +306,6 @@ def run(args: argparse.Namespace) -> None:
         "encoder_loss": [],
         "decoder_loss": [],
         "quantization_penalty": [],
-        "quantization_error": [],
         "n_updates": 0,
     }
 
@@ -360,8 +359,9 @@ def run(args: argparse.Namespace) -> None:
             batch = batch.to(device)
             last_batch = batch
 
-            # Compute auxiliary reconstruction every N batches for encoder/decoder tracking
-            compute_aux = (batch_idx % 10 == 0) and model_config.get("enable_encoder_decoder_tracking", True)
+            # Compute auxiliary reconstruction whenever we'll store metrics (to ensure they align)
+            will_store_metrics = ((update_count + 1) % args.metrics_stride == 0) or (batch_idx == len(train_loader) - 1)
+            compute_aux = will_store_metrics and model_config.get("enable_encoder_decoder_tracking", True)
             
             embedding_loss, x_hat, perplexity, logits = model(batch, compute_aux_reconstruction=compute_aux)
             last_reconstruction = x_hat

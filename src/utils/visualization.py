@@ -79,11 +79,6 @@ def plot_training_results(results: Dict[str, List[float]], save_dir: str):
             ax2.plot(enc_steps, results['encoder_loss'], label='Pre-Quantization Loss', 
                     color='green', linewidth=2, alpha=0.8)
         
-        if 'quantization_error' in results and len(results['quantization_error']) > 0:
-            qe_steps = np.linspace(0, len(results['loss_vals']), len(results['quantization_error']))
-            ax2.plot(qe_steps, results['quantization_error'], label='Quantization Error', 
-                    color='orange', linewidth=1.5, alpha=0.7, linestyle='--')
-        
         # Add perplexity on secondary y-axis
         ax2_right = ax2.twinx()
         ax2_right.plot(results['perplexities'], label='Perplexity', 

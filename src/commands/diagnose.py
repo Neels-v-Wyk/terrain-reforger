@@ -120,7 +120,7 @@ def run(args: argparse.Namespace) -> None:
     if args.checkpoint:
         print(f"Loading checkpoint: {args.checkpoint}")
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
         print("  Checkpoint loaded\n")
     
     # Run diagnostic epoch(s)
