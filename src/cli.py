@@ -12,6 +12,7 @@ from src.commands.analyze import main as analyze_main
 from src.commands.diagnose import run as run_diagnose
 from src.commands.export import run as run_export
 from src.commands.extract_tokens import run as run_extract_tokens
+from src.commands.generate import run as run_generate
 from src.commands.infer import run as run_infer
 from src.commands.lr_find import run as run_lr_find
 from src.commands.prepare import run_preparation
@@ -334,7 +335,43 @@ def gen_train_command(
         eval_every=1,
         num_samples=3,
         num_workers=num_workers,
+      
+
+
+@gen_app.command("generate")
+def gen_generate_command(
+    transformer: Optional[str] = typer.Option(None, "--transformer", help="Path to transformer checkpoint"),
+    vqvae: Optional[str] = typer.Option(None, "--vqvae", help="Path to VQVAE checkpoint"),
+    width: int = typer.Option(256, "--width", help="Width in tiles"),
+    height: int = typer.Option(256, "--height", help="Height in tiles"),
+    num_samples: int = typer.Option(1, "--num-samples", help="Number of regions to generate"),
+    temperature: float = typer.Option(1.0, "--temperature", help="Sampling temperature"),
+    top_k: int = typer.Option(50, "--top-k", help="Top-k sampling (0 to disable)"),
+    top_p: float = typer.Option(0.95, "--top-p", help="Nucleus sampling (0 to disable)"),
+    output_dir: str = typer.Option("exports/generated", "--output-dir", help="Output directory"),
+    export_format: str = typer.Option("tedit", "--export-format", help="Export format: tedit, numpy, or both"),
+    visualize: bool = typer.Option(True, "--visualize/--no-visualize", help="Show streaming progress"),
+    save_tokens: bool = typer.Option(False, "--save-tokens", help="Save token sequences"),
+    batch_chunks: int = typer.Option(1, "--batch-chunks", help="Chunks to generate in parallel"),
+    seed: Optional[int] = typer.Option(None, "--seed", help="Random seed"),
+) -> None:
+    """Generate terrain with streaming visualization (shows blocks generating in real-time)."""
+    run_generate(argparse.Namespace(
+        transformer=transformer,
+        vqvae=vqvae,
+        width=width,
+        height=height,
+        num_samples=num_samples,
+        temperature=temperature,
+        top_k=top_k,
+        top_p=top_p,
+        output_dir=output_dir,
+        export_format=export_format,
+        visualize=visualize,
+        save_tokens=save_tokens,
+        batch_chunks=batch_chunks,
         seed=seed,
+    ))  seed=seed,
     ))
 
 
