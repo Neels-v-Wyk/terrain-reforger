@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Optional, Sequence, List
 
 import torch
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
+from torch.optim.lr_scheduler import OneCycleLR, CosineAnnealingLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader, ConcatDataset, Dataset, Subset
 
 from src.autoencoder.dataset_cached import CachedTileDataset
@@ -56,6 +57,27 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--one-pass", action="store_true", help="Train for exactly one pass over the data (epochs=1)")
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
     parser.add_argument("--learning-rate", "--lr", type=float, default=2e-4, help="Learning rate (default: 2e-4)")
+    parser.add_argument("--optimizer", type=str, default="adam", choices=["adam", "adamw"], help="Optimizer (default: adam)")
+    parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay for AdamW (default: 0.0)")
+    parser.add_argument(
+        "--lr-schedule",
+        type=str,
+        default="none",
+        choices=["none", "cosine", "onecycle"],
+        help="Learning rate schedule (default: none)",
+    )
+    parser.add_argument(
+        "--warmup-fraction",
+        type=float,
+        default=0.05,
+        help="Fraction of total steps for warmup (default: 0.05)",
+    )
+    parser.add_argument(
+        "--grad-clip",
+        type=float,
+        default=0.0,
+        help="Gradient clipping max norm (0 = disabled, default: 0)",
+    )
     parser.add_argument("--resume", type=str, help="Resume from checkpoint")
     parser.add_argument("--val-split", type=float, default=0.1, help="Fraction of data to use for validation (default: 0.1)")
     parser.add_argument("--disk-mode", action="store_true", help="Use disk-based loading with LRU cache (saves RAM)")
@@ -94,6 +116,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Maximum class weight clamp for weighted block loss (default: 5.0)",
     )
     parser.add_argument(
+        "--use-focal-loss",
+        action="store_true",
+        help="Use focal loss instead of cross-entropy for block classification",
+    )
+    parser.add_argument(
+        "--focal-alpha",
+        type=float,
+        default=1.0,
+        help="Alpha parameter for focal loss (default: 1.0)",
+    )
+    parser.add_argument(
+        "--focal-gamma",
+        type=float,
+        default=2.0,
+        help="Gamma parameter for focal loss - higher focuses more on hard examples (default: 2.0)",
+    )
+    parser.add_argument(
         "--metrics-stride",
         type=int,
         default=50,
@@ -111,7 +150,7 @@ def run(args: argparse.Namespace) -> None:
         "embedding_dim": 32,
         "h_dim": 128,
         "res_h_dim": 64,
-        "n_embeddings": 512,
+        "n_embeddings": 1024,  # Increased from 512 to 1024
         "beta": args.beta,
         # EMA settings to prevent codebook collapse
         "use_ema": not args.no_ema,
@@ -273,6 +312,10 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Total training samples: {len(train_dataset)}")
     print(f"  Total validation samples: {len(val_dataset)}")
     print(f"  Learning rate: {learning_rate:.2e}")
+    print(f"  Optimizer: {args.optimizer.upper()}" + (f" (weight_decay={args.weight_decay})" if args.weight_decay > 0 else ""))
+    print(f"  LR schedule: {args.lr_schedule}" + (f" (warmup={args.warmup_fraction*100:.1f}%)" if args.lr_schedule != "none" else ""))
+    if args.grad_clip > 0:
+        print(f"  Gradient clipping: {args.grad_clip}")
     print("  Model: VQ-VAE (8 channels)")
     print(f"  Embedding dim: {model_config['embedding_dim']}")
     print(f"  Codebook size: {model_config['n_embeddings']}")
@@ -281,6 +324,8 @@ def run(args: argparse.Namespace) -> None:
         f"  Block loss weighting: {'enabled' if args.block_loss_weighted else 'disabled'} "
         f"(min={args.block_weight_min}, max={args.block_weight_max})"
     )
+    if args.use_focal_loss:
+        print(f"  Focal loss: enabled (alpha={args.focal_alpha}, gamma={args.focal_gamma})")
     if model_config['use_ema']:
         dead_usage_rate = model_config['ema_reset_threshold'] / model_config['n_embeddings']
         print(f"  EMA decay: {model_config['ema_decay']}")
@@ -292,7 +337,49 @@ def run(args: argparse.Namespace) -> None:
     print(f"  Metrics stride: every {args.metrics_stride} updates")
 
     model = VQVAE(**model_config).to(device)
-    optimizer = Adam(model.parameters(), lr=learning_rate)
+    
+    # Create optimizer
+    if args.optimizer == "adamw":
+        optimizer = AdamW(model.parameters(), lr=learning_rate, weight_decay=args.weight_decay)
+    else:
+        optimizer = Adam(model.parameters(), lr=learning_rate)
+    
+    # Create learning rate scheduler
+    total_steps = len(train_loader) * num_epochs
+    scheduler = None
+    
+    if args.lr_schedule == "onecycle":
+        scheduler = OneCycleLR(
+            optimizer,
+            max_lr=learning_rate,
+            total_steps=total_steps,
+            pct_start=args.warmup_fraction,
+            anneal_strategy='cos',
+            div_factor=25,  # initial_lr = max_lr / 25
+            final_div_factor=1e4,  # min_lr = initial_lr / 1e4
+        )
+    elif args.lr_schedule == "cosine":
+        warmup_steps = int(total_steps * args.warmup_fraction)
+        
+        warmup_scheduler = LinearLR(
+            optimizer,
+            start_factor=0.04,  # Start at 4% of base LR
+            end_factor=1.0,
+            total_iters=warmup_steps,
+        )
+        
+        cosine_scheduler = CosineAnnealingLR(
+            optimizer,
+            T_max=total_steps - warmup_steps,
+            eta_min=learning_rate * 0.01,  # Minimum LR is 1% of initial
+        )
+        
+        scheduler = SequentialLR(
+            optimizer,
+            schedulers=[warmup_scheduler, cosine_scheduler],
+            milestones=[warmup_steps],
+        )
+    
     checkpoint_manager = CheckpointManager(checkpoint_dir="checkpoints")
 
     results = {
@@ -316,14 +403,17 @@ def run(args: argparse.Namespace) -> None:
     resume_path = args.resume or os.environ.get("RESUME_CHECKPOINT")
     if resume_path and Path(resume_path).exists():
         print(f"\nResuming from checkpoint: {resume_path}")
-        model, loaded_optimizer, results, start_epoch = checkpoint_manager.load_checkpoint(
+        model, loaded_optimizer, results, start_epoch, loaded_scheduler = checkpoint_manager.load_checkpoint(
             model,
             resume_path,
             optimizer,
             str(device),
+            scheduler,
         )
         if loaded_optimizer is not None:
             optimizer = loaded_optimizer
+        if loaded_scheduler is not None:
+            scheduler = loaded_scheduler
         best_loss = min(results.get("loss_vals", [float("inf")]))
         update_count = int(results.get("n_updates", 0))
         results.setdefault("shape_loss", [])
@@ -378,13 +468,25 @@ def run(args: argparse.Namespace) -> None:
                 block_loss_weighted=args.block_loss_weighted,
                 block_weight_min=args.block_weight_min,
                 block_weight_max=args.block_weight_max,
+                use_focal_loss=args.use_focal_loss,
+                focal_alpha=args.focal_alpha,
+                focal_gamma=args.focal_gamma,
                 aux_reconstruction=aux_reconstruction,
                 aux_logits=aux_logits,
             )
 
             optimizer.zero_grad()
             total_loss.backward()
+            
+            # Gradient clipping
+            if args.grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
+            
             optimizer.step()
+            
+            # Learning rate scheduler step
+            if scheduler is not None:
+                scheduler.step()
 
             for key in epoch_losses:
                 if key in loss_dict:
@@ -425,6 +527,7 @@ def run(args: argparse.Namespace) -> None:
                     epoch=epoch,
                     config=model_config,
                     is_best=is_best,
+                    scheduler=scheduler,
                 )
                 checkpoint_manager.cleanup_old_checkpoints(keep_last_n=3)
 

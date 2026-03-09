@@ -2,7 +2,7 @@
 
 import torch
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict
 
 
@@ -10,7 +10,7 @@ def compute_class_accuracy(
     logits: torch.Tensor,
     targets: torch.Tensor,
     num_classes: int,
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Compute per-class accuracy metrics.
     
@@ -52,7 +52,7 @@ def compute_class_accuracy(
 def compute_class_distribution(
     targets: torch.Tensor,
     num_classes: int,
-) -> Dict[int, any]:
+) -> Dict[int, Any]:
     """
     Compute class frequency distribution.
     
@@ -154,6 +154,85 @@ def analyze_codebook_health(
         "top10_share": top10_share,
         "active_above_uniform": above_uniform,
         "active_above_half_uniform": above_half_uniform,
+    }
+
+
+def compute_tiered_accuracy(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    class_distribution: Dict[int, int],
+    num_classes: int,
+) -> Dict[str, Any]:
+    """
+    Compute accuracy metrics grouped by frequency tier.
+    
+    Args:
+        logits: (B, num_classes, H, W) prediction logits
+        targets: (B, H, W) ground truth class indices
+        class_distribution: Dictionary mapping class_idx -> count
+        num_classes: Number of classes
+        
+    Returns:
+        Dictionary with tiered accuracy metrics
+    """
+    predictions = torch.argmax(logits, dim=1)  # (B, H, W)
+    correct = (predictions == targets).float()
+    
+    # Calculate total counts and thresholds
+    total_count = sum(class_distribution.values())
+    
+    # Define tiers based on frequency
+    rare_classes = []      # < 1% of total
+    medium_classes = []    # 1-10% of total
+    common_classes = []    # > 10% of total
+    
+    for class_idx in range(num_classes):
+        count = class_distribution.get(class_idx, 0)
+        if count == 0:
+            continue
+        
+        frequency = count / total_count
+        if frequency < 0.01:
+            rare_classes.append(class_idx)
+        elif frequency < 0.10:
+            medium_classes.append(class_idx)
+        else:
+            common_classes.append(class_idx)
+    
+    # Compute accuracy for each tier
+    def tier_accuracy(class_list):
+        if not class_list:
+            return 0.0, 0
+        mask = torch.zeros_like(targets, dtype=torch.bool)
+        for cls in class_list:
+            mask |= (targets == cls)
+        if mask.sum() == 0:
+            return 0.0, 0
+        return correct[mask].mean().item(), mask.sum().item()
+    
+    rare_acc, rare_support = tier_accuracy(rare_classes)
+    medium_acc, medium_support = tier_accuracy(medium_classes)
+    common_acc, common_support = tier_accuracy(common_classes)
+    
+    return {
+        "rare": {
+            "accuracy": rare_acc,
+            "support": rare_support,
+            "num_classes": len(rare_classes),
+            "classes": rare_classes[:10],  # First 10 for inspection
+        },
+        "medium": {
+            "accuracy": medium_acc,
+            "support": medium_support,
+            "num_classes": len(medium_classes),
+            "classes": medium_classes[:10],
+        },
+        "common": {
+            "accuracy": common_acc,
+            "support": common_support,
+            "num_classes": len(common_classes),
+            "classes": common_classes,
+        },
     }
 
 

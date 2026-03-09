@@ -44,7 +44,8 @@ class CheckpointManager:
         epoch: int,
         config: Optional[Dict[str, Any]] = None,
         is_best: bool = False,
-        tag: str = ""
+        tag: str = "",
+        scheduler: Optional[Any] = None,
     ) -> Path:
         """
         Save a training checkpoint.
@@ -57,6 +58,7 @@ class CheckpointManager:
             config: Model configuration dictionary
             is_best: Whether this is the best model so far
             tag: Optional tag for checkpoint name
+            scheduler: Optional LR scheduler to save
             
         Returns:
             Path to saved checkpoint
@@ -82,6 +84,9 @@ class CheckpointManager:
         
         if config:
             checkpoint['config'] = config
+        
+        if scheduler is not None:
+            checkpoint['scheduler_state_dict'] = scheduler.state_dict()
         
         # Save checkpoint
         torch.save(checkpoint, checkpoint_path)
@@ -148,11 +153,9 @@ class CheckpointManager:
     
     def load_checkpoint(
         self,
-        model: torch.nn.Module,
-        checkpoint_path: Optional[str | Path] = None,
-        optimizer: Optional[torch.optim.Optimizer] = None,
-        device: str = 'cpu'
-    ) -> Tuple[torch.nn.Module, Optional[torch.optim.Optimizer], Dict[str, Any], int]:
+        model: torch.nn.Mod,
+        scheduler: Optional[Any] = None,
+    ) -> Tuple[torch.nn.Module, Optional[torch.optim.Optimizer], Dict[str, Any], int, Optional[Any]]:
         """
         Load a checkpoint.
         
@@ -161,6 +164,10 @@ class CheckpointManager:
             checkpoint_path: Path to checkpoint file (or None for latest)
             optimizer: Optimizer to load state into (optional)
             device: Device to map tensors to
+            scheduler: Optional LR scheduler to load state into
+            
+        Returns:
+            Tuple of (model, optimizer, results, epoch, scheduler
             
         Returns:
             Tuple of (model, optimizer, results, epoch)
@@ -183,15 +190,20 @@ class CheckpointManager:
         model.load_state_dict(checkpoint['model_state_dict'])
         print(f"Model state loaded (epoch {checkpoint.get('epoch', 'unknown')})")
         
-        # Load optimizer state if provided
-        if optimizer and 'optimizer_state_dict' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            print("Optimizer state loaded")
+        # Load scheduler state if provided
+        if scheduler and 'scheduler_state_dict' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            print("Scheduler state loaded")
         
-        # Return model, optimizer, results, and epoch
+        # Return model, optimizer, results, epoch, and scheduler
         results = checkpoint.get('results', {})
         epoch = checkpoint.get('epoch', 0)
         
+        print(f"Checkpoint loaded successfully")
+        if 'config' in checkpoint:
+            print(f"Config: {checkpoint['config']}")
+        
+        return model, optimizer, results, epoch, scheduler
         print(f"Checkpoint loaded successfully")
         if 'config' in checkpoint:
             print(f"Config: {checkpoint['config']}")

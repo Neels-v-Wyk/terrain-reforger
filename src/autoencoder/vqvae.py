@@ -47,7 +47,7 @@ DEFAULT_MODEL_CONFIG: dict = {
     "embedding_dim": 32,
     "h_dim": 128,
     "res_h_dim": 64,
-    "n_embeddings": 512,
+    "n_embeddings": 1024,  # Increased from 512 to 1024 for more capacity
     "beta": 0.25,
     "use_ema": True,
     "ema_decay": 0.99,
@@ -326,6 +326,51 @@ class VQVAE(nn.Module):
         return None
 
 
+def focal_loss(
+    logits: torch.Tensor,
+    targets: torch.Tensor,
+    alpha: float = 1.0,
+    gamma: float = 2.0,
+    reduction: str = 'mean',
+) -> torch.Tensor:
+    """
+    Focal Loss for addressing class imbalance.
+    
+    FL(pt) = -α(1-pt)^γ * log(pt)
+    
+    Args:
+        logits: (B, num_classes, H, W) prediction logits
+        targets: (B, H, W) ground truth class indices
+        alpha: Weighting factor (default: 1.0)
+        gamma: Focusing parameter (default: 2.0). Higher gamma = more focus on hard examples
+        reduction: 'mean' or 'sum'
+        
+    Returns:
+        Focal loss value
+    """
+    # Compute softmax probabilities
+    probs = F.softmax(logits, dim=1)  # (B, num_classes, H, W)
+    
+    # Get probabilities of the true class
+    num_classes = logits.shape[1]
+    targets_one_hot = F.one_hot(targets, num_classes=num_classes)  # (B, H, W, num_classes)
+    targets_one_hot = targets_one_hot.permute(0, 3, 1, 2).float()  # (B, num_classes, H, W)
+    
+    pt = (probs * targets_one_hot).sum(dim=1)  # (B, H, W) - probability of true class
+    
+    # Compute focal loss
+    focal_weight = (1 - pt) ** gamma
+    ce_loss = F.cross_entropy(logits, targets, reduction='none')  # (B, H, W)
+    focal_loss_val = alpha * focal_weight * ce_loss
+    
+    if reduction == 'mean':
+        return focal_loss_val.mean()
+    elif reduction == 'sum':
+        return focal_loss_val.sum()
+    else:
+        return focal_loss_val
+
+
 def compute_loss(
     x: torch.Tensor,
     x_hat: torch.Tensor,
@@ -337,6 +382,9 @@ def compute_loss(
     binary_loss_weight: float = 1.0,
     aux_reconstruction: Optional[torch.Tensor] = None,
     aux_logits: Optional[Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]] = None,
+    use_focal_loss: bool = False,
+    focal_alpha: float = 1.0,
+    focal_gamma: float = 2.0,
 ) -> Tuple[torch.Tensor, dict]:
     """
     Compute loss for model.
@@ -352,6 +400,9 @@ def compute_loss(
         binary_loss_weight: Weight applied to BCE over binary channels
         aux_reconstruction: Optional pre-quantization reconstruction (for encoder loss)
         aux_logits: Optional pre-quantization logits (for encoder loss)
+        use_focal_loss: Use focal loss instead of cross-entropy for blocks
+        focal_alpha: Alpha parameter for focal loss
+        focal_gamma: Gamma parameter for focal loss (higher = more focus on hard examples)
         
     Returns:
         total_loss: Combined loss
@@ -372,8 +423,12 @@ def compute_loss(
     wall_target = torch.clamp(wall_target, 0, NUM_NATURAL_WALLS - 1)
     liquid_target = torch.clamp(liquid_target, 0, NUM_LIQUID_TYPES - 1)
     
-    # Categorical losses (cross-entropy)
-    if block_loss_weighted:
+    # Categorical losses (cross-entropy or focal loss)
+    if use_focal_loss:
+        # Use focal loss for blocks (especially good for class imbalance)
+        block_loss = focal_loss(block_logits, block_target, alpha=focal_alpha, gamma=focal_gamma)
+    elif block_loss_weighted:
+        # Use weighted cross-entropy
         counts = torch.bincount(block_target.reshape(-1), minlength=NUM_NATURAL_BLOCKS).float()
         block_weights = 1.0 / torch.sqrt(counts + 1.0)
         block_weights = block_weights / block_weights.mean().clamp_min(1e-6)

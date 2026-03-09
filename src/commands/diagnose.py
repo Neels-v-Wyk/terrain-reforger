@@ -17,6 +17,7 @@ from src.utils.device import get_device
 from src.utils.diagnostics import (
     compute_class_accuracy,
     compute_class_distribution,
+    compute_tiered_accuracy,
     get_top_confused_pairs,
     analyze_codebook_health,
     get_diagnostic_summary,
@@ -105,7 +106,7 @@ def run(args: argparse.Namespace) -> None:
         "embedding_dim": 32,
         "h_dim": 128,
         "res_h_dim": 64,
-        "n_embeddings": 512,
+        "n_embeddings": 1024,  # Increased from 512 to 1024
         "beta": args.beta,
         "use_ema": not args.no_ema,
         "ema_decay": args.ema_decay,
@@ -131,6 +132,8 @@ def run(args: argparse.Namespace) -> None:
     all_block_accuracies = []
     all_class_distributions = []
     all_encodings = []
+    all_block_logits = []
+    all_block_targets = []
     start_time = time.time()
     
     print("Running diagnostic epochs...")
@@ -167,6 +170,10 @@ def run(args: argparse.Namespace) -> None:
                 # Collect class distribution
                 dist = compute_class_distribution(block_targets, NUM_NATURAL_BLOCKS)
                 all_class_distributions.append(dist)
+                
+                # Collect logits and targets for tiered accuracy
+                all_block_logits.append(block_logits.cpu())
+                all_block_targets.append(block_targets.cpu())
                 
                 # Collect encodings for codebook analysis
                 if hasattr(model, 'last_encodings') and model.last_encodings is not None:
@@ -248,6 +255,36 @@ def run(args: argparse.Namespace) -> None:
         block_id = BLOCK_INDEX_TO_ID.get(class_idx, class_idx)
         print(f"  {i+1:2d}. Class {class_idx:3d} (ID={block_id:3d}): {count:8d} ({percent:5.2f}%) | Cumulative: {cumulative:5.1f}%")
     
+    # Tiered accuracy analysis
+    if all_block_logits and all_block_targets:
+        print("\nBlock Accuracy by Frequency Tier:")
+        all_logits_tensor = torch.cat(all_block_logits, dim=0)
+        all_targets_tensor = torch.cat(all_block_targets, dim=0)
+        
+        tiered_acc = compute_tiered_accuracy(
+            all_logits_tensor,
+            all_targets_tensor,
+            total_dist,
+            NUM_NATURAL_BLOCKS,
+        )
+        
+        print(f"  Common blocks (>10% frequency):")
+        print(f"    Accuracy: {tiered_acc['common']['accuracy']*100:.2f}%")
+        print(f"    Classes: {tiered_acc['common']['num_classes']}")
+        print(f"    Support: {tiered_acc['common']['support']:,} tiles")
+        
+        print(f"  Medium blocks (1-10% frequency):")
+        print(f"    Accuracy: {tiered_acc['medium']['accuracy']*100:.2f}%")
+        print(f"    Classes: {tiered_acc['medium']['num_classes']}")
+        print(f"    Support: {tiered_acc['medium']['support']:,} tiles")
+        
+        print(f"  Rare blocks (<1% frequency):")
+        print(f"    Accuracy: {tiered_acc['rare']['accuracy']*100:.2f}%")
+        print(f"    Classes: {tiered_acc['rare']['num_classes']}")
+        print(f"    Support: {tiered_acc['rare']['support']:,} tiles")
+    else:
+        tiered_acc = None
+    
     # Suggestions
     print("\n" + "=" * 80)
     print("SUGGESTIONS")
@@ -300,6 +337,7 @@ def run(args: argparse.Namespace) -> None:
             "avg_block_accuracy": sum(all_block_accuracies) / len(all_block_accuracies) if all_block_accuracies else 0.0,
         },
         "codebook": codebook_stats if all_encodings else {},
+        "tiered_accuracy": tiered_acc if tiered_acc else {},
         "class_distribution_top20": [
             {"class_idx": int(idx), "block_id": BLOCK_INDEX_TO_ID.get(idx, idx), "count": int(cnt)}
             for idx, cnt in sorted_classes[:20]
