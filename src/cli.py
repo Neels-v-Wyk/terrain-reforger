@@ -11,16 +11,19 @@ from rich.console import Console
 from src.commands.analyze import main as analyze_main
 from src.commands.diagnose import run as run_diagnose
 from src.commands.export import run as run_export
+from src.commands.extract_tokens import run as run_extract_tokens
 from src.commands.infer import run as run_infer
 from src.commands.lr_find import run as run_lr_find
 from src.commands.prepare import run_preparation
 from src.commands.train import run as run_train
+from src.commands.train_transformer import run as run_train_transformer
 from src.commands.worldgen import main as worldgen_main
 
 app = typer.Typer(help="Terrain Reforger CLI", no_args_is_help=True, rich_markup_mode="rich")
 console = Console()
 data_app = typer.Typer(help="Data preparation and analysis commands", no_args_is_help=True)
 model_app = typer.Typer(help="Model training and inference commands", no_args_is_help=True)
+gen_app = typer.Typer(help="Generative model commands (transformer, etc.)", no_args_is_help=True)
 
 
 # ---------------------------------------------------------------------------
@@ -264,6 +267,75 @@ def model_export_command(
 
 app.add_typer(data_app, name="data")
 app.add_typer(model_app, name="model")
+app.add_typer(gen_app, name="gen")
+
+
+# ---------------------------------------------------------------------------
+# gen commands (generative models)
+# ---------------------------------------------------------------------------
+
+@gen_app.command("extract-tokens")
+def gen_extract_tokens_command(
+    model: Optional[str] = typer.Option(None, "--model", help="Path to VQVAE checkpoint (defaults to best_model.pt)"),
+    data: str = typer.Option("data/dataset.pt", "--data", help="Path to preprocessed tile dataset"),
+    output: str = typer.Option("data/token_sequences.pt", "--output", help="Output path for token sequences"),
+    batch_size: int = typer.Option(64, "--batch-size", help="Batch size for encoding"),
+    val_split: float = typer.Option(0.1, "--val-split", help="Validation split fraction"),
+) -> None:
+    """Extract VQVAE token sequences for transformer training."""
+    run_extract_tokens(argparse.Namespace(
+        model=model,
+        data=data,
+        output=output,
+        batch_size=batch_size,
+        val_split=val_split,
+    ))
+
+
+@gen_app.command("train")
+def gen_train_command(
+    data: str = typer.Option("data/token_sequences.pt", "--data", help="Path to token sequences dataset"),
+    model_size: str = typer.Option("medium", "--model-size", help="Model size: small, medium, or large"),
+    epochs: int = typer.Option(50, "--epochs", help="Number of epochs"),
+    batch_size: int = typer.Option(128, "--batch-size", help="Batch size"),
+    learning_rate: float = typer.Option(1e-4, "--learning-rate", "--lr", help="Learning rate"),
+    weight_decay: float = typer.Option(0.01, "--weight-decay", help="Weight decay"),
+    grad_clip: float = typer.Option(1.0, "--grad-clip", help="Gradient clipping norm"),
+    warmup_epochs: int = typer.Option(2, "--warmup-epochs", help="Warmup epochs"),
+    checkpoint_dir: str = typer.Option("checkpoints/transformer", "--checkpoint-dir", help="Checkpoint directory"),
+    save_every: int = typer.Option(5, "--save-every", help="Save checkpoint every N epochs"),
+    resume: Optional[str] = typer.Option(None, "--resume", help="Resume from checkpoint"),
+    d_model: Optional[int] = typer.Option(None, "--d-model", help="Hidden dimension (overrides preset)"),
+    n_layers: Optional[int] = typer.Option(None, "--n-layers", help="Number of layers (overrides preset)"),
+    n_heads: Optional[int] = typer.Option(None, "--n-heads", help="Number of attention heads (overrides preset)"),
+    d_ff: Optional[int] = typer.Option(None, "--d-ff", help="Feedforward dimension (overrides preset)"),
+    dropout: float = typer.Option(0.1, "--dropout", help="Dropout rate"),
+    num_workers: int = typer.Option(4, "--num-workers", help="DataLoader workers"),
+    seed: int = typer.Option(42, "--seed", help="Random seed"),
+) -> None:
+    """Train transformer model for terrain generation."""
+    run_train_transformer(argparse.Namespace(
+        data=data,
+        model_size=model_size,
+        epochs=epochs,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        weight_decay=weight_decay,
+        grad_clip=grad_clip,
+        warmup_epochs=warmup_epochs,
+        checkpoint_dir=checkpoint_dir,
+        save_every=save_every,
+        resume=resume,
+        d_model=d_model,
+        n_layers=n_layers,
+        n_heads=n_heads,
+        d_ff=d_ff,
+        dropout=dropout,
+        eval_every=1,
+        num_samples=3,
+        num_workers=num_workers,
+        seed=seed,
+    ))
 
 
 def main() -> None:
